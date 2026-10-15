@@ -20,6 +20,12 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
   { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
   { cli_key: "gemini", enabled: false, base_origin: null, applied_to_current_gateway: null },
   { cli_key: "grok", enabled: false, base_origin: null, applied_to_current_gateway: null },
+  {
+    cli_key: "claude_desktop",
+    enabled: false,
+    base_origin: null,
+    applied_to_current_gateway: null,
+  },
 ];
 
 // Default settings matching the Rust backend defaults (src-tauri/src/infra/settings/defaults.rs).
@@ -35,7 +41,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   gateway_custom_listen_address: "",
   wsl_auto_config: false,
   wsl_target_cli: { claude: true, codex: true, gemini: true },
-  cli_priority_order: ["claude", "codex", "gemini", "grok"],
+  cli_priority_order: ["claude", "codex", "gemini", "grok", "claude_desktop"],
   wsl_host_address_mode: "auto",
   wsl_custom_host_address: "127.0.0.1",
   codex_home_mode: "user_home_default",

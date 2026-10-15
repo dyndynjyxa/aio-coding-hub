@@ -170,6 +170,7 @@ const EMPTY_ROUTE_ROWS: ProviderRouteRow[] = [];
 function emptyActiveModeByCli(): Record<CliKey, number | null> {
   return {
     claude: null,
+    claude_desktop: null,
     codex: null,
     gemini: null,
     grok: null,

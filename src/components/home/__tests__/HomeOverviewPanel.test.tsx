@@ -80,15 +80,15 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
     headerAddon,
   }: {
     configs: Array<{
-      cliKey: "claude" | "codex" | "gemini";
+      cliKey: HomeCliWorkspaceConfig["cliKey"];
       cliLabel: string;
       workspaceName: string | null;
       workspaceId: number | null;
       workspaces: Array<{ id: number; name: string; isActive: boolean }>;
       items: Array<{ id: string; name: string }>;
     }>;
-    selectedCliKey: "claude" | "codex" | "gemini" | null;
-    onSelectCliKey: (cliKey: "claude" | "codex" | "gemini") => void;
+    selectedCliKey: HomeCliWorkspaceConfig["cliKey"] | null;
+    onSelectCliKey: (cliKey: HomeCliWorkspaceConfig["cliKey"]) => void;
     headerAddon?: ReactNode;
   }) => {
     const selectedConfig =
@@ -145,7 +145,7 @@ function makeWorkspaceItem(
 }
 
 function makeWorkspaceConfig(input: {
-  cliKey: "claude" | "codex" | "gemini";
+  cliKey: HomeCliWorkspaceConfig["cliKey"];
   cliLabel: string;
   workspaceId: number | null;
   workspaceName: string | null;
@@ -196,8 +196,20 @@ function renderPanel(overrides: HomeOverviewPanelTestOverrides = {}) {
       sortModes={[]}
       sortModesLoading={false}
       sortModesAvailable={true}
-      activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-      activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
+      activeModeByCli={{
+        claude: null,
+        codex: null,
+        gemini: null,
+        grok: null,
+        claude_desktop: null,
+      }}
+      activeModeToggling={{
+        claude: false,
+        codex: false,
+        gemini: false,
+        grok: false,
+        claude_desktop: false,
+      }}
       onSetCliActiveMode={onSetCliActiveMode}
       activeSessions={[]}
       activeSessionsLoading={false}
@@ -305,7 +317,7 @@ describe("components/home/HomeOverviewPanel", () => {
   it("shows workspace config pills and allows switching sort mode for the selected cli", async () => {
     const { onSetCliActiveMode } = renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
-      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null },
+      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null, claude_desktop: null },
       workspaceConfigs: [
         makeWorkspaceConfig({
           cliKey: "claude",
@@ -357,7 +369,7 @@ describe("components/home/HomeOverviewPanel", () => {
 
     const { onSetCliActiveMode } = renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
-      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null },
+      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null, claude_desktop: null },
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
@@ -640,8 +652,20 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
+        activeModeByCli={{
+          claude: null,
+          codex: null,
+          gemini: null,
+          grok: null,
+          claude_desktop: null,
+        }}
+        activeModeToggling={{
+          claude: false,
+          codex: false,
+          gemini: false,
+          grok: false,
+          claude_desktop: false,
+        }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
@@ -735,8 +759,20 @@ describe("components/home/HomeOverviewPanel", () => {
             sortModes={[]}
             sortModesLoading={false}
             sortModesAvailable={true}
-            activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-            activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
+            activeModeByCli={{
+              claude: null,
+              codex: null,
+              gemini: null,
+              grok: null,
+              claude_desktop: null,
+            }}
+            activeModeToggling={{
+              claude: false,
+              codex: false,
+              gemini: false,
+              grok: false,
+              claude_desktop: false,
+            }}
             onSetCliActiveMode={vi.fn()}
             activeSessions={[]}
             activeSessionsLoading={false}
@@ -867,8 +903,20 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
+        activeModeByCli={{
+          claude: null,
+          codex: null,
+          gemini: null,
+          grok: null,
+          claude_desktop: null,
+        }}
+        activeModeToggling={{
+          claude: false,
+          codex: false,
+          gemini: false,
+          grok: false,
+          claude_desktop: false,
+        }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
@@ -943,8 +991,20 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
+        activeModeByCli={{
+          claude: null,
+          codex: null,
+          gemini: null,
+          grok: null,
+          claude_desktop: null,
+        }}
+        activeModeToggling={{
+          claude: false,
+          codex: false,
+          gemini: false,
+          grok: false,
+          claude_desktop: false,
+        }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
@@ -1026,8 +1086,20 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
+        activeModeByCli={{
+          claude: null,
+          codex: null,
+          gemini: null,
+          grok: null,
+          claude_desktop: null,
+        }}
+        activeModeToggling={{
+          claude: false,
+          codex: false,
+          gemini: false,
+          grok: false,
+          claude_desktop: false,
+        }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}

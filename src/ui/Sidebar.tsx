@@ -85,12 +85,13 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 const NAV: NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
-const CLI_PROXY_ORDER: readonly CliKey[] = ["claude", "codex", "grok", "gemini"];
+const CLI_PROXY_ORDER: readonly CliKey[] = ["claude", "claude_desktop", "codex", "grok", "gemini"];
 const CLI_PROXY_ITEMS = [...clisWith("cliProxy")].sort(
   (left, right) => CLI_PROXY_ORDER.indexOf(left.key) - CLI_PROXY_ORDER.indexOf(right.key)
 );
 const CLI_PROXY_LOGOS: Record<CliKey, string> = {
   claude: claudeFavicon,
+  claude_desktop: claudeFavicon,
   codex: codexLogo,
   grok: grokLogo,
   gemini: geminiLogo,
@@ -291,7 +292,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
   }
 
   return (
-    <div className="grid w-full grid-cols-4 gap-1" aria-label="CLI 代理控制">
+    <div className="grid w-full grid-cols-3 gap-1" aria-label="CLI 代理控制">
       {CLI_PROXY_ITEMS.map(({ key: cliKey }) => {
         const isEnabled = !!cliProxyState.cliProxyEnabled[cliKey];
         const drifted =
@@ -320,6 +321,11 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
                 (cliKey === "codex" || cliKey === "grok") && "dark:invert"
               )}
             />
+            {cliKey === "claude_desktop" ? (
+              <span className="absolute left-0.5 top-0.5 text-[8px] font-bold" aria-hidden="true">
+                D
+              </span>
+            ) : null}
             <Switch
               checked={isEnabled}
               disabled={toggling}

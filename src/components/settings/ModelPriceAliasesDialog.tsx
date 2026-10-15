@@ -191,6 +191,14 @@ function ModelPriceAliasesDatalists({ modelsByCli }: { modelsByCli: Record<CliKe
           </option>
         ))}
       </datalist>
+      <datalist id={modelsDatalistId("claude_desktop")}>
+        {/* Desktop uses Claude model names and Claude price rows. */}
+        {[...new Set([...modelsByCli.claude_desktop, ...modelsByCli.claude])].map((m) => (
+          <option key={`claude_desktop:${m}`} value={m}>
+            {m}
+          </option>
+        ))}
+      </datalist>
       <datalist id={modelsDatalistId("codex")}>
         {modelsByCli.codex.map((m) => (
           <option key={`codex:${m}`} value={m}>
@@ -535,7 +543,13 @@ export function ModelPriceAliasesDialog({
   const modelRows = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
 
   const modelsByCli = useMemo(() => {
-    const byCli: Record<CliKey, string[]> = { claude: [], codex: [], gemini: [], grok: [] };
+    const byCli: Record<CliKey, string[]> = {
+      claude: [],
+      claude_desktop: [],
+      codex: [],
+      gemini: [],
+      grok: [],
+    };
     for (const row of modelRows) {
       byCli[row.cli_key].push(row.model);
     }

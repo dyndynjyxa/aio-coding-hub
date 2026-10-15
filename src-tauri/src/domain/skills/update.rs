@@ -326,6 +326,11 @@ WHERE id = ?7
             .collect();
     for cli_key in skill_cli_keys.iter().copied() {
         if let Err(err) = sync_one_cli(app, &conn, cli_key) {
+            // Like an uninstalled CLI, Desktop before its first 3P launch has no copy to update.
+            if crate::cli_proxy::claude_desktop_not_initialized(&err) {
+                tracing::warn!(cli_key = %cli_key, "skill update sync skipped: {err}");
+                continue;
+            }
             let rollback_suffix = restore_committed_update(
                 &conn,
                 &skill,

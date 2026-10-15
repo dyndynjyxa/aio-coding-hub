@@ -1,6 +1,6 @@
 // Usage: Shared CLI definitions and derived UI filter helpers.
 
-export const CLI_KEYS = ["claude", "codex", "gemini", "grok"] as const;
+export const CLI_KEYS = ["claude", "claude_desktop", "codex", "gemini", "grok"] as const;
 
 export type CliKey = (typeof CLI_KEYS)[number];
 
@@ -83,12 +83,31 @@ const GROK_CAPABILITIES = capabilities(
   "workspaces"
 );
 
+const CLAUDE_DESKTOP_CAPABILITIES = capabilities(
+  "gateway",
+  "provider",
+  "logs",
+  "usage",
+  "pricing",
+  "cliProxy",
+  "mcp",
+  "skills",
+  "prompts",
+  "workspaces"
+);
+
 export const CLI_REGISTRY: readonly CliItem[] = [
   {
     key: "claude",
     name: "Claude",
     desc: "Claude CLI",
     capabilities: LEGACY_CLI_CAPABILITIES,
+  },
+  {
+    key: "claude_desktop",
+    name: "Desktop",
+    desc: "Claude Desktop 3P 配置",
+    capabilities: CLAUDE_DESKTOP_CAPABILITIES,
   },
   {
     key: "codex",
@@ -144,6 +163,7 @@ const CLI_SHORT_LABELS: Record<CliKey, string> = {
   codex: "Codex",
   gemini: "Gemini",
   grok: "Grok",
+  claude_desktop: "Desktop",
 };
 
 export const CLI_SHORT_ITEMS: Array<{ key: CliKey; label: string }> = CLIS.map((cli) => ({
