@@ -87,7 +87,6 @@ async fn connect_with_client(
         let config = WebSocketConfig {
             max_message_size: Some(MAX_MESSAGE_BYTES),
             max_frame_size: Some(MAX_MESSAGE_BYTES),
-            max_write_buffer_size: 2 * MAX_MESSAGE_BYTES,
             ..WebSocketConfig::default()
         };
         let socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, Some(config)).await;

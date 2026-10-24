@@ -22,6 +22,12 @@ const CLIENT_ABORT_ERROR_CODES: ReadonlySet<string> = new Set([
 
 const STATUS_TEXT_UNKNOWN = "状态未知";
 
+export const FULL_INPUT_RETRY_PRESENTATION = {
+  label: "请求完整重发",
+  desc: "网关已要求客户端重发完整输入",
+  suggestion: "支持自动恢复的客户端会重发完整输入；恢复结果请查看后续请求。",
+};
+
 type RequestLogAuditInput = {
   cli_key: CliKey | string;
   path: string;
@@ -79,6 +85,26 @@ function auditTag(label: string, className: string, title?: string): RequestLogA
   return { label, className, title };
 }
 
+export function isCodexFullInputRetry(
+  log: Pick<RequestLogAuditInput, "cli_key" | "status" | "error_code" | "special_settings_json"> & {
+    error_category?: string | null;
+  }
+): boolean {
+  return (
+    log.cli_key === "codex" &&
+    log.status === 400 &&
+    log.error_code === GatewayErrorCodes.REQUEST_REJECTED &&
+    // Realtime summaries omit audit settings; ws_attempt::finish_error reserves context for full-input retry.
+    (log.error_category === "context" ||
+      parseRequestLogSpecialSettings(log.special_settings_json).some(
+        (setting) =>
+          setting.type === "codex_responses_transport" &&
+          setting.transport_action === "full_input_retry" &&
+          setting.reason_code === "previous_response_not_found"
+      ))
+  );
+}
+
 export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogAuditMeta {
   const settings = parseRequestLogSpecialSettings(log.special_settings_json);
   const settingTypes = new Set(settings.flatMap((item) => (item.type ? [item.type] : [])));
@@ -90,6 +116,7 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     (!!(log.error_code && CLIENT_ABORT_ERROR_CODES.has(log.error_code)) ||
       settingTypes.has("client_abort"));
   const isAllProvidersUnavailable = log.error_code === GatewayErrorCodes.ALL_PROVIDERS_UNAVAILABLE;
+  const isContextRecovery = isCodexFullInputRetry(log);
   const excludedFromStats = !!log.excluded_from_stats;
 
   const tags: RequestLogAuditTag[] = [];
@@ -144,6 +171,16 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     );
   }
 
+  if (isContextRecovery) {
+    tags.push(
+      auditTag(
+        FULL_INPUT_RETRY_PRESENTATION.label,
+        "bg-secondary/90 text-muted-foreground ring-1 ring-inset ring-border",
+        "网关已要求客户端重发完整输入，恢复结果请查看后续请求。"
+      )
+    );
+  }
+
   let summary: string | null = null;
   if (isWarmupIntercept) {
     summary = "Warmup 命中后由网关直接应答，仅保留审计记录，不进入统计。";
@@ -153,6 +190,8 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     summary = "当前没有可用 Provider，网关未继续向已熔断或冷却中的供应商发起上游请求。";
   } else if (isClientAbort) {
     summary = "客户端中途中断了请求，系统保留这条审计记录但不计入统计。";
+  } else if (isContextRecovery) {
+    summary = "网关已要求客户端重发完整输入；本条保留 400，恢复结果请查看后续请求。";
   } else if (excludedFromStats) {
     summary = "这条记录仅用于审计可见性，不参与统计聚合。";
   }
@@ -213,12 +252,15 @@ export type StatusBadge = {
   isError: boolean;
   isClientAbort: boolean;
   isIncomplete?: boolean;
+  isFullInputRetry?: boolean;
   hasFailover: boolean;
 };
 
 export function computeStatusBadge(input: {
   status: number | null;
   errorCode: string | null;
+  cliKey?: string;
+  errorCategory?: string | null;
   inProgress?: boolean;
   hasFailover?: boolean;
   specialSettingsJson?: string | null;
@@ -229,6 +271,27 @@ export function computeStatusBadge(input: {
       text: "进行中",
       semanticText: "请求进行中",
       tone: "bg-accent/10 text-accent ring-1 ring-inset ring-accent/15",
+      isError: false,
+      isClientAbort: false,
+      hasFailover: !!input.hasFailover,
+    };
+  }
+
+  if (
+    isCodexFullInputRetry({
+      cli_key: input.cliKey ?? "",
+      status: input.status,
+      error_code: input.errorCode,
+      special_settings_json: input.specialSettingsJson,
+      error_category: input.errorCategory,
+    })
+  ) {
+    return {
+      text: `${input.status} ${FULL_INPUT_RETRY_PRESENTATION.label}`,
+      semanticText: FULL_INPUT_RETRY_PRESENTATION.label,
+      title: `${FULL_INPUT_RETRY_PRESENTATION.label} · ${FULL_INPUT_RETRY_PRESENTATION.suggestion} (${input.errorCode})`,
+      tone: "text-muted-foreground bg-secondary ring-1 ring-inset ring-border",
+      isFullInputRetry: true,
       isError: false,
       isClientAbort: false,
       hasFailover: !!input.hasFailover,

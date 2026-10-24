@@ -167,6 +167,110 @@ describe("components/home/requestLogPresentation", () => {
     });
   });
 
+  it("labels a full-input recovery request without claiming its retry succeeded", () => {
+    const recovery = {
+      cli_key: "codex",
+      path: "/v1/responses",
+      status: 400,
+      error_code: GatewayErrorCodes.REQUEST_REJECTED,
+      special_settings_json: JSON.stringify([
+        {
+          type: "codex_responses_transport",
+          transport_action: "full_input_retry",
+          providerId: 7,
+          failure_class: "context",
+          reason_code: "previous_response_not_found",
+        },
+      ]),
+    };
+    const meta = buildRequestLogAuditMeta(recovery);
+    expect(meta.tags.map((tag) => tag.label)).toContain("请求完整重发");
+    expect(meta.summary).toContain("恢复结果请查看后续请求");
+    expect(meta.providerFallbackText).toBeNull();
+    const badge = computeStatusBadge({
+      cliKey: recovery.cli_key,
+      status: recovery.status,
+      errorCode: recovery.error_code,
+      specialSettingsJson: recovery.special_settings_json,
+    });
+    expect(badge).toMatchObject({
+      text: "400 请求完整重发",
+      semanticText: "请求完整重发",
+      isError: false,
+      isFullInputRetry: true,
+    });
+    expect(badge.tone).toContain("text-muted-foreground");
+    expect(badge.title).toContain("支持自动恢复的客户端会重发完整输入");
+    expect(badge.title).not.toContain("请求拒绝");
+    expect(badge.title).not.toContain("成功");
+
+    for (const overrides of [
+      { status: 200, error_code: null },
+      { special_settings_json: null },
+      {
+        special_settings_json: JSON.stringify([
+          { type: "codex_responses_transport", transport_action: "full_input_retry" },
+        ]),
+      },
+      { error_code: GatewayErrorCodes.UPSTREAM_4XX },
+      { cli_key: "claude" },
+    ]) {
+      const log = { ...recovery, ...overrides };
+      expect(buildRequestLogAuditMeta(log).tags).toEqual([]);
+      expect(
+        computeStatusBadge({
+          cliKey: log.cli_key,
+          status: log.status,
+          errorCode: log.error_code,
+          specialSettingsJson: log.special_settings_json,
+        }).isFullInputRetry
+      ).not.toBe(true);
+    }
+  });
+
+  it.each([
+    {
+      cliKey: "codex",
+      status: 400,
+      errorCode: GatewayErrorCodes.REQUEST_REJECTED,
+      errorCategory: "context",
+      expected: true,
+    },
+    {
+      cliKey: "codex",
+      status: 400,
+      errorCode: GatewayErrorCodes.REQUEST_REJECTED,
+      errorCategory: "local",
+      expected: false,
+    },
+    {
+      cliKey: "codex",
+      status: 400,
+      errorCode: GatewayErrorCodes.UPSTREAM_4XX,
+      errorCategory: "context",
+      expected: false,
+    },
+    {
+      cliKey: "claude",
+      status: 400,
+      errorCode: GatewayErrorCodes.REQUEST_REJECTED,
+      errorCategory: "context",
+      expected: false,
+    },
+    {
+      cliKey: "codex",
+      status: 500,
+      errorCode: GatewayErrorCodes.REQUEST_REJECTED,
+      errorCategory: "context",
+      expected: false,
+    },
+  ])(
+    "classifies realtime recovery evidence strictly ($cliKey/$status/$errorCode/$errorCategory)",
+    ({ expected, ...input }) => {
+      expect(computeStatusBadge(input).isFullInputRetry === true).toBe(expected);
+    }
+  );
+
   it("covers malformed special settings and trace ordering edge cases", () => {
     expect(resolveClaudeModelMappingFromSpecialSettings(null)).toBeNull();
     expect(resolveClaudeModelMappingFromSpecialSettings("123")).toBeNull();

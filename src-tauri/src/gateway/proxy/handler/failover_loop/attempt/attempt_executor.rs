@@ -69,7 +69,9 @@ pub(super) enum AttemptSendOutcome {
     Response(reqwest::Response, AttemptTiming),
     StreamResponse(crate::gateway::streams::UpstreamResponse, AttemptTiming),
     WsTransport(&'static str, AttemptTiming),
-    ContextLost(AttemptTiming),
+    ContextLost {
+        require_http: bool,
+    },
     LocalProtocol(&'static str, AttemptTiming),
     Timeout(AttemptTiming),
     ReqwestError(reqwest::Error, AttemptTiming),
@@ -202,13 +204,6 @@ where
                 );
                 return AttemptSendOutcome::PluginBlocked(blocked.reason);
             }
-            if (input.ws_request.is_some() || input.ws_connection.is_some())
-                && output.body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
-            {
-                return AttemptSendOutcome::PluginBlocked(
-                    "Managed Responses plugin output exceeds byte limit".into(),
-                );
-            }
             semantic_headers = output.headers;
             // The hook transforms this physical attempt, not the provider retry baseline.
             body_state_for_attempt.replace_decoded(output.body);
@@ -272,13 +267,6 @@ where
         }
     }
 
-    if (input.ws_request.is_some() || input.ws_connection.is_some())
-        && upstream_body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
-    {
-        return AttemptSendOutcome::PluginBlocked(
-            "Managed Responses request exceeds byte limit".into(),
-        );
-    }
     emit_upstream_attempt_fingerprint(
         ctx,
         input,
@@ -352,7 +340,9 @@ where
             SendOutcome::Transport(reason) => {
                 return AttemptSendOutcome::WsTransport(reason, timing)
             }
-            SendOutcome::ContextLost => return AttemptSendOutcome::ContextLost(timing),
+            SendOutcome::ContextLost { require_http } => {
+                return AttemptSendOutcome::ContextLost { require_http }
+            }
             SendOutcome::Local(reason) => return AttemptSendOutcome::LocalProtocol(reason, timing),
             SendOutcome::Http(reason) => {
                 super::ws_attempt::marker(

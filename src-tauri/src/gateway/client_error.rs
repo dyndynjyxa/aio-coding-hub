@@ -96,14 +96,22 @@ pub(super) fn ws_error(status: StatusCode, code: &str, message: &str) -> Value {
     json!({"type":"error","status":status.as_u16(),"error":{"type":openai_error_type(status),"code":code,"message":message}})
 }
 
-/// Preserve upstream error fields while supplying the status required by Responses clients.
+/// Preserve stream error status; only a pre-stream recovery response may omit it.
 pub(super) fn normalize_ws_error(mut event: Value, status: Option<StatusCode>) -> Value {
     if event.get("type").and_then(Value::as_str) == Some("response.failed") {
         return event;
     }
+    let recovery_response = status == Some(StatusCode::BAD_REQUEST)
+        && event.pointer("/error/code").and_then(Value::as_str)
+            == Some("previous_response_not_found");
     let status = status.unwrap_or_else(|| super::responses_ws::gate::error_status(&event));
     event["type"] = json!("error");
-    event["status"] = json!(status.as_u16());
+    if recovery_response {
+        // Older Codex clients treat a status-bearing 400 as terminal before checking the code.
+        event.as_object_mut().unwrap().remove("status");
+    } else {
+        event["status"] = json!(status.as_u16());
+    }
     if event.pointer("/error/type").is_none() {
         event["error"]["type"] = json!(openai_error_type(status));
     }
@@ -113,6 +121,32 @@ pub(super) fn normalize_ws_error(mut event: Value, status: Option<StatusCode>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ws_context_recovery_omits_terminal_status_without_changing_other_errors() {
+        let event = ws_error(
+            StatusCode::BAD_REQUEST,
+            "previous_response_not_found",
+            "resend the full input",
+        );
+        let normalized = normalize_ws_error(event.clone(), Some(StatusCode::BAD_REQUEST));
+        assert!(normalized.get("status").is_none());
+        assert_eq!(normalized["error"], event["error"]);
+        let streamed = normalize_ws_error(event.clone(), None);
+        assert_eq!(streamed["status"], 400);
+        assert_eq!(streamed["error"], event["error"]);
+        assert_eq!(
+            normalize_ws_error(event, Some(StatusCode::UNAUTHORIZED))["status"],
+            401
+        );
+        assert_eq!(
+            normalize_ws_error(
+                ws_error(StatusCode::BAD_REQUEST, "invalid_request", "bad input"),
+                None
+            )["status"],
+            400
+        );
+    }
 
     #[test]
     fn native_ws_errors_preserve_fields_and_failed_response_structure() {

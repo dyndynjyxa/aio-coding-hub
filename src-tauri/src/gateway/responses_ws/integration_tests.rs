@@ -268,7 +268,8 @@ enum Behavior {
     MalformedSse(&'static str),
     AllFail,
     DisconnectAfterContent,
-    ErrorAfterContent,
+    DisconnectIncrementalBeforeOutput,
+    ErrorAfterContent(&'static str),
     JsonComplete,
     JsonIncomplete,
     HoldAfterContent,
@@ -290,6 +291,9 @@ impl Stub {
         };
         let router = Router::new()
             .route("/v1/responses", get(stub_ws).post(stub_http))
+            .layer(axum::extract::DefaultBodyLimit::max(
+                crate::gateway::util::max_request_body_bytes(),
+            ))
             .with_state(stub.clone());
         (stub, Server::start(router).await)
     }
@@ -330,7 +334,7 @@ async fn stub_ws(
     stub.calls
         .lock()
         .unwrap()
-        .push(("ws".into(), headers, Value::Null));
+        .push(("ws".into(), headers.clone(), Value::Null));
     if let Behavior::UpgradeRejected(status, code) = stub.behavior {
         return (
             StatusCode::from_u16(status).unwrap(),
@@ -347,10 +351,21 @@ async fn stub_ws(
                 let body: Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(body["type"], "response.create");
                 assert!(body.get("stream").is_none());
+                if matches!(stub.behavior, Behavior::DisconnectIncrementalBeforeOutput)
+                    && body.get("previous_response_id").is_some()
+                {
+                    stub.calls
+                        .lock()
+                        .unwrap()
+                        .push(("ws".into(), headers.clone(), body));
+                    break;
+                }
                 for event in events(stub.name).into_iter().take(
                     if matches!(
                         stub.behavior,
-                        Behavior::DisconnectAfterContent | Behavior::ErrorAfterContent | Behavior::HoldAfterContent
+                        Behavior::DisconnectAfterContent
+                            | Behavior::ErrorAfterContent(_)
+                            | Behavior::HoldAfterContent
                     ) {
                         2
                     } else {
@@ -365,15 +380,26 @@ async fn stub_ws(
                 if matches!(stub.behavior, Behavior::HoldAfterContent) {
                     stub.release.notified().await;
                     for event in events(stub.name).into_iter().skip(2) {
-                        if socket.send(axum::extract::ws::Message::Text(event.to_string())).await.is_err() { return; }
+                        if socket
+                            .send(axum::extract::ws::Message::Text(event.to_string()))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
                     }
                 }
-                if matches!(stub.behavior, Behavior::ErrorAfterContent) {
+                if let Behavior::ErrorAfterContent(code) = stub.behavior {
                     socket.send(axum::extract::ws::Message::Text(json!({
-                        "type":"error", "error":{"type":"server_error", "code":"server_error", "message":"failed after output"}
+                        "type":"error", "error":{"code":code, "message":"failed after output"}
                     }).to_string())).await.unwrap();
                 }
-                if !matches!(stub.behavior, Behavior::KeepAlive) { break; }
+                if !matches!(
+                    stub.behavior,
+                    Behavior::KeepAlive | Behavior::DisconnectIncrementalBeforeOutput
+                ) {
+                    break;
+                }
             }
             let _ = socket.close().await;
         })
@@ -522,6 +548,47 @@ fn assert_completed(observed: &[Value], name: &str) {
             .count(),
         1
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "waits for the configured 70-second connection idle timeout"]
+async fn connection_idle_timeout_uses_global_setting_and_zero_disables_it() {
+    let fixture = Fixture::new(true).await;
+    let (gateway, _logs) = fixture.start().await;
+    let mut sockets = Vec::new();
+    for seconds in [0, 70] {
+        let mut settings = settings::read(fixture.app.handle()).unwrap();
+        settings.upstream_stream_idle_timeout_seconds = seconds;
+        settings::write(fixture.app.handle(), &settings).unwrap();
+        let mut socket = connect(&gateway, &format!("idle-{seconds}")).await.unwrap();
+        socket.send(Message::Ping(vec![1])).await.unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap(),
+            Message::Pong(vec![1])
+        );
+        sockets.push(socket);
+    }
+
+    tokio::time::sleep(Duration::from_secs(61)).await;
+    for socket in &mut sockets {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), socket.next())
+                .await
+                .is_err(),
+            "must stay open beyond the former fixed 60-second timeout"
+        );
+    }
+    let closed = tokio::time::timeout(Duration::from_secs(15), sockets[1].next())
+        .await
+        .expect("configured idle timeout closes the connection");
+    assert!(matches!(closed, Some(Ok(Message::Close(_)))));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), sockets[0].next())
+            .await
+            .is_err(),
+        "zero disables connection idle timeout"
+    );
+    let _ = sockets[0].close(None).await;
 }
 
 async fn terminal_log(
@@ -864,6 +931,139 @@ async fn ws_client_uses_http_for_provider_without_ws_capability() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn http_fallback_moves_only_the_affected_session_to_continuous_http() {
+    for (supports_ws, behavior) in [
+        (false, Behavior::Complete),
+        (true, Behavior::UnsupportedWs),
+        (true, Behavior::DisconnectIncrementalBeforeOutput),
+    ] {
+        for metadata in [false, true] {
+            let fixture = Fixture::new(true).await;
+            let (stub, upstream) = Stub::start("A", behavior).await;
+            fixture.provider("A", &upstream.origin(), supports_ws);
+            let (gateway, mut logs) = fixture.start().await;
+            // The transport session need not equal the recovery owner's session.
+            let session = "http-fallback-transport";
+            let Message::Text(create) = create_message(metadata.then_some("http-fallback-owner"))
+            else {
+                unreachable!()
+            };
+            let mut body: Value = serde_json::from_str(&create).unwrap();
+            body["input"][0]["type"] = json!("message");
+            let mut history = body["input"].as_array().unwrap().clone();
+            let mut socket = connect(&gateway, session).await.unwrap();
+            socket.send(Message::Text(body.to_string())).await.unwrap();
+            let nonce = if metadata {
+                Some(
+                    recv_until(&mut socket, "response.metadata").await["headers"]
+                        [protocol::TURN_STATE_HEADER]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            } else {
+                None
+            };
+            let completed = recv_until(&mut socket, "response.completed").await;
+            history.extend(
+                completed["response"]["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .cloned(),
+            );
+            assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+            let upstream_before = stub.transports();
+
+            let next = json!({"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]});
+            history.push(next.clone());
+            body["input"] = json!([next]);
+            body["previous_response_id"] = json!("resp-A");
+            if let Some(nonce) = &nonce {
+                body["client_metadata"][protocol::TURN_STATE_HEADER] = json!(nonce);
+            }
+            socket.send(Message::Text(body.to_string())).await.unwrap();
+            let error = recv_until(&mut socket, "error").await;
+            assert_eq!(error["error"]["code"], "previous_response_not_found");
+            assert!(error.get("status").is_none());
+            let failure = terminal_log(&mut logs).await;
+            assert_eq!(failure.status, Some(400));
+            let attempts: Vec<Value> = serde_json::from_str(&failure.attempts_json).unwrap();
+            if matches!(behavior, Behavior::DisconnectIncrementalBeforeOutput) {
+                assert!(attempts
+                    .iter()
+                    .any(|attempt| attempt["reason"] == "ws_stream_failed_before_output"));
+                assert_eq!(stub.transports(), ["ws", "ws"]);
+            } else {
+                assert!(
+                    attempts.is_empty(),
+                    "local context rejection must not call upstream"
+                );
+                assert_eq!(stub.transports(), upstream_before);
+            }
+            drop(socket);
+            match connect(&gateway, session).await {
+                Err(Error::Http(response)) => {
+                    assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED)
+                }
+                Ok(_) => panic!("expected affected session to switch to HTTP; got 101"),
+                Err(error) => panic!("expected affected session to switch to HTTP: {error}"),
+            }
+            let mut other = connect(&gateway, "unaffected-session").await.unwrap();
+            other.close(None).await.unwrap();
+            let mut expected = stub.transports();
+
+            body.as_object_mut().unwrap().remove("type");
+            body.as_object_mut().unwrap().remove("previous_response_id");
+            body["stream"] = json!(true);
+            for round in 0..2 {
+                body["input"] = json!(history);
+                let mut request = reqwest::Client::new()
+                    .post(format!("{}/v1/responses", gateway.origin()))
+                    .header("session-id", session)
+                    .json(&body);
+                if let Some(nonce) = &nonce {
+                    request = request.header(protocol::TURN_STATE_HEADER, nonce);
+                }
+                let response = request.send().await.unwrap();
+                let status = response.status();
+                let text = response.text().await.unwrap();
+                assert_eq!(status, StatusCode::OK, "{text}");
+                assert!(text.contains("response.completed"));
+                let row = terminal_log(&mut logs).await;
+                assert_eq!(row.status, Some(200));
+                if metadata && round == 0 {
+                    assert!(row
+                        .special_settings_json
+                        .unwrap_or_default()
+                        .contains("recovery_from_trace_id"));
+                }
+                expected.push("http".into());
+                assert_eq!(stub.transports(), expected);
+                history.extend(
+                    events("A").last().unwrap()["response"]["output"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .cloned(),
+                );
+                history.push(json!({"type":"message","role":"user","content":[{"type":"input_text","text":"next HTTP round"}]}));
+            }
+            for (transport, headers, body) in stub.calls.lock().unwrap().iter() {
+                if transport == "http" {
+                    assert!(body.get("previous_response_id").is_none());
+                    assert!(!headers.contains_key(protocol::TURN_STATE_HEADER));
+                    assert!(body
+                        .pointer("/client_metadata/x-codex-turn-state")
+                        .is_none());
+                }
+            }
+            stub.assert_auth();
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ws_capable_provider_uses_upstream_ws_and_selected_credentials() {
     let fixture = Fixture::new(true).await;
     let (stub, upstream) = Stub::start("A", Behavior::Complete).await;
@@ -1109,32 +1309,58 @@ async fn json_incomplete_is_terminal_without_retry_or_provider_switch() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn error_event_after_content_is_terminal_without_provider_switch() {
-    let fixture = Fixture::new(true).await;
-    let (first, first_server) = Stub::start("A", Behavior::ErrorAfterContent).await;
-    let (next, next_server) = Stub::start("B", Behavior::Complete).await;
-    fixture.provider("A", &first_server.origin(), true);
-    fixture.provider("B", &next_server.origin(), false);
-    let (gateway, mut logs) = fixture.start().await;
-    let observed = generate(&gateway, "post-content-error").await;
-    assert!(observed
-        .iter()
-        .any(|event| event["type"] == "response.output_text.delta"));
-    assert_eq!(observed.last().unwrap()["type"], "error", "{observed:?}");
-    assert_eq!(observed.last().unwrap()["error"]["code"], "server_error");
-    assert!(!observed
-        .iter()
-        .any(|event| event["type"] == "response.completed"));
-    assert!(terminal_log(&mut logs).await.error_code.is_some());
-    assert_eq!(first.transports(), ["ws"]);
-    assert!(next.transports().is_empty());
+    for (code, status) in [("server_error", 502), ("previous_response_not_found", 400)] {
+        let fixture = Fixture::new(true).await;
+        let (first, first_server) = Stub::start("A", Behavior::ErrorAfterContent(code)).await;
+        let (next, next_server) = Stub::start("B", Behavior::Complete).await;
+        fixture.provider("A", &first_server.origin(), true);
+        fixture.provider("B", &next_server.origin(), false);
+        let (gateway, mut logs) = fixture.start().await;
+        let observed = generate(&gateway, "post-content-error").await;
+        assert!(observed
+            .iter()
+            .any(|event| event["type"] == "response.output_text.delta"));
+        assert_eq!(observed.last().unwrap()["type"], "error", "{observed:?}");
+        assert_eq!(observed.last().unwrap()["error"]["code"], code);
+        assert_eq!(observed.last().unwrap()["status"], status);
+        assert!(!observed
+            .iter()
+            .any(|event| event["type"] == "response.completed"));
+        assert!(terminal_log(&mut logs).await.error_code.is_some());
+        assert_eq!(first.transports(), ["ws"]);
+        assert!(next.transports().is_empty());
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+enum CliRecoveryFailure {
+    #[default]
+    ContextLost,
+    Disconnect,
+    ContextLostAfterOutput,
 }
 
 #[derive(Clone, Default)]
 struct CliRecoveryStub {
+    failure: CliRecoveryFailure,
     context_lost: Arc<std::sync::atomic::AtomicBool>,
     calls: Arc<Mutex<Vec<(&'static str, Value)>>>,
-    first_input: Arc<Mutex<Option<Vec<Value>>>>,
     tool_item: Arc<Mutex<Option<Value>>>,
+}
+
+fn cli_first_generation_input(calls: &[(&str, Value)]) -> Vec<Value> {
+    let mut input = Vec::new();
+    for (_, body) in calls {
+        // A formal increment can reuse input sent by a preceding prewarm.
+        if body.get("previous_response_id").is_none() {
+            input.clear();
+        }
+        input.extend(body["input"].as_array().unwrap().iter().cloned());
+        if body["generate"] != false {
+            break;
+        }
+    }
+    input
 }
 
 fn shell_tool(tools: &[Value], namespace: Option<&str>) -> Option<(String, Option<String>)> {
@@ -1153,20 +1379,20 @@ fn shell_tool(tools: &[Value], namespace: Option<&str>) -> Option<(String, Optio
     None
 }
 
-fn cli_tool_item(body: &Value) -> Value {
+fn cli_tool_item(body: &Value, suffix: &str) -> Value {
     let (name, namespace) =
         shell_tool(body["tools"].as_array().unwrap(), None).expect("CLI shell tool");
     let command = if cfg!(windows) {
-        "Add-Content -LiteralPath probe-count.txt -Value executed"
+        format!("Add-Content -LiteralPath probe-count.txt -Value executed{suffix}")
     } else {
-        "printf 'executed\\n' >> probe-count.txt"
+        format!("printf 'executed{suffix}\\n' >> probe-count.txt")
     };
     let args = match name.as_str() {
         "exec_command" => json!({"cmd":command,"max_output_tokens":50}),
         "shell_command" => json!({"command":command,"timeout_ms":1000}),
         _ => json!({"command":["sh","-c",command],"timeout_ms":1000}),
     };
-    let mut item = json!({"type":"function_call","id":"fc_router_tool","call_id":"router_tool","name":name,"arguments":args.to_string()});
+    let mut item = json!({"type":"function_call","id":format!("fc_router_tool{suffix}"),"call_id":format!("router_tool{suffix}"),"name":name,"arguments":args.to_string()});
     if let Some(namespace) = namespace {
         item["namespace"] = json!(namespace);
     }
@@ -1189,10 +1415,14 @@ async fn cli_recovery_ws(
                 vec![json!({"type":"response.created","response":{"id":"warm"}}), json!({"type":"response.completed","response":{"id":"warm","status":"completed","output":[]}})]
             } else if body["input"].as_array().unwrap().iter().any(|item| item["type"] == "function_call_output") {
                 stub.context_lost.store(true, std::sync::atomic::Ordering::Release);
-                vec![protocol::error_event("previous_response_not_found", "Synthetic lost context")]
+                let error = protocol::error_event("previous_response_not_found", "Synthetic lost context");
+                match stub.failure {
+                    CliRecoveryFailure::Disconnect => break,
+                    CliRecoveryFailure::ContextLost => vec![error],
+                    CliRecoveryFailure::ContextLostAfterOutput => events("partial").into_iter().take(3).chain(std::iter::once(error)).collect(),
+                }
             } else {
-                *stub.first_input.lock().unwrap() = Some(body["input"].as_array().unwrap().clone());
-                let item = cli_tool_item(&body);
+                let item = cli_tool_item(&body, "");
                 *stub.tool_item.lock().unwrap() = Some(item.clone());
                 vec![
                     json!({"type":"response.created","response":{"id":"resp-tool"}}),
@@ -1211,9 +1441,35 @@ async fn cli_recovery_ws(
 
 async fn cli_recovery_http(
     State(stub): State<CliRecoveryStub>,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    stub.calls.lock().unwrap().push(("http", body));
+    assert!(!headers.contains_key(protocol::TURN_STATE_HEADER));
+    assert!(body
+        .pointer("/client_metadata/x-codex-turn-state")
+        .is_none());
+    stub.calls.lock().unwrap().push(("http", body.clone()));
+    if matches!(stub.failure, CliRecoveryFailure::Disconnect) {
+        let output = if body["input"].as_array().unwrap().iter().any(|item| {
+            item["type"] == "function_call_output" && item["call_id"] == "router_tool-http"
+        }) {
+            events("final")
+        } else {
+            let item = cli_tool_item(&body, "-http");
+            vec![
+                json!({"type":"response.output_item.done","item":item}),
+                json!({"type":"response.completed","response":{"id":"resp-http-tool","status":"completed","output":[item]}}),
+            ]
+        };
+        return (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            output
+                .iter()
+                .flat_map(|event| protocol::sse_bytes(event).to_vec())
+                .collect::<Vec<_>>(),
+        )
+            .into_response();
+    }
     (
         StatusCode::SERVICE_UNAVAILABLE,
         Json(json!({"error":{"type":"api_error","message":"A unavailable after context loss"}})),
@@ -1436,10 +1692,13 @@ async fn real_codex_cli_rebuilds_context_then_fails_over_without_repeating_tool(
         "no account-bound response reference may reach B"
     );
     let input = full["input"].as_array().unwrap();
-    let original = recovery.first_input.lock().unwrap();
-    let original = original.as_ref().unwrap();
-    assert!(
-        input.starts_with(original),
+    let original = cli_first_generation_input(&calls);
+    let original_digest = protocol::HistoryDigest::from_items(&original);
+    assert!(original_digest.is_recoverable());
+    assert!(input.len() >= original.len());
+    assert_eq!(
+        protocol::HistoryDigest::from_items(&input[..original.len()]),
+        original_digest,
         "original input must survive rebuild"
     );
     let item = recovery.tool_item.lock().unwrap();
@@ -1493,6 +1752,228 @@ async fn real_codex_cli_rebuilds_context_then_fails_over_without_repeating_tool(
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an explicitly selected real Codex CLI executable"]
+async fn real_codex_cli_switches_to_http_after_ws_loss_without_repeating_tools() {
+    run_real_codex_cli_ws_failure(CliRecoveryFailure::Disconnect).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires a selected Codex CLI whose status-bearing 400 errors are terminal"]
+async fn real_codex_cli_keeps_post_output_context_error_terminal() {
+    run_real_codex_cli_ws_failure(CliRecoveryFailure::ContextLostAfterOutput).await;
+}
+
+async fn run_real_codex_cli_ws_failure(failure: CliRecoveryFailure) {
+    let cli = std::path::PathBuf::from(
+        std::env::var_os("AIO_CODEX_WS_TEST_CLI").expect("selected Codex executable"),
+    );
+    assert!(cli.is_absolute() && cli.is_file());
+    let fixture = Fixture::new(true).await;
+    let stub = CliRecoveryStub {
+        failure,
+        ..Default::default()
+    };
+    let upstream = Server::start(
+        Router::new()
+            .route(
+                "/v1/responses",
+                get(cli_recovery_ws).post(cli_recovery_http),
+            )
+            .with_state(stub.clone()),
+    )
+    .await;
+    fixture.provider("A", &upstream.origin(), true);
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+    let (log_tx, mut logs) = tokio::sync::mpsc::channel(32);
+    let router = fixture
+        .router(log_tx, GatewayPluginPipeline::empty_shared())
+        .layer(axum::middleware::from_fn(
+            move |request: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
+                let recorded = recorded.clone();
+                async move {
+                    let method = request.method().to_string();
+                    let response = next.run(request).await;
+                    recorded
+                        .lock()
+                        .unwrap()
+                        .push((method, response.status().as_u16()));
+                    response
+                }
+            },
+        ));
+    let gateway = Server::start(router).await;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("work")).unwrap();
+    std::fs::create_dir(root.path().join("codex")).unwrap();
+    std::fs::write(
+        root.path().join("codex/config.toml"),
+        cli_test_config(&gateway.origin()),
+    )
+    .unwrap();
+    let version = run_cli(isolated_cli_command(&cli, root.path()).arg("--version")).await;
+    assert!(version.status.success());
+    let output = run_cli(isolated_cli_command(&cli, root.path()).args([
+        "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-rules", "--json", "--color", "never", "--cd",
+    ]).arg(root.path().join("work")).arg("Run this local protocol test. Execute each tool requested by the test server exactly once, then finish.")).await;
+    if matches!(failure, CliRecoveryFailure::ContextLostAfterOutput) {
+        assert!(!output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("answer-partial"),
+            "CLI must receive the partial output: {stdout}"
+        );
+        assert!(stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .any(|event| event["type"] == "turn.failed"));
+        assert_eq!(*requests.lock().unwrap(), [("GET".into(), 101)]);
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|(_, body)| body["generate"] != false)
+                .map(|(transport, _)| *transport)
+                .collect::<Vec<_>>(),
+            ["ws", "ws"]
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("work/probe-count.txt"))
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["executed"]
+        );
+        println!(
+            "{} → partial output → terminal context error: passed; no extra generation",
+            String::from_utf8_lossy(&version.stdout).trim()
+        );
+        return;
+    }
+    assert!(
+        output.status.success(),
+        "CLI failed: status={}, stderr={}, stdout={}, AIO requests={:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout),
+        requests.lock().unwrap()
+    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .any(|event| event["type"] == "turn.completed"));
+    let executions = std::fs::read_to_string(root.path().join("work/probe-count.txt")).unwrap();
+    assert_eq!(
+        executions.lines().collect::<Vec<_>>(),
+        ["executed", "executed-http"]
+    );
+    assert_eq!(
+        *requests.lock().unwrap(),
+        [
+            ("GET".into(), 101),
+            ("GET".into(), 426),
+            ("POST".into(), 200),
+            ("POST".into(), 200),
+        ],
+        "AIO must move the real CLI to HTTP before the second tool"
+    );
+    let calls = stub.calls.lock().unwrap();
+    let generations: Vec<_> = calls
+        .iter()
+        .filter(|(_, body)| body["generate"] != false)
+        .collect();
+    assert_eq!(
+        generations
+            .iter()
+            .map(|(transport, _)| *transport)
+            .collect::<Vec<_>>(),
+        ["ws", "ws", "http", "http"]
+    );
+    let original = cli_first_generation_input(&calls);
+    let original_digest = protocol::HistoryDigest::from_items(&original);
+    assert!(original_digest.is_recoverable());
+    let tool = stub.tool_item.lock().unwrap();
+    let tool = tool.as_ref().unwrap();
+    let failed_output = calls
+        .iter()
+        .filter(|(transport, _)| *transport == "ws")
+        .flat_map(|(_, body)| body["input"].as_array().unwrap())
+        .find(|item| item["type"] == "function_call_output" && item["call_id"] == tool["call_id"])
+        .unwrap();
+    let failed_output_digest =
+        protocol::HistoryDigest::from_items(std::slice::from_ref(failed_output));
+    assert!(failed_output_digest.is_recoverable());
+    for (round, (_, body)) in calls
+        .iter()
+        .filter(|(transport, _)| *transport == "http")
+        .enumerate()
+    {
+        assert!(body.get("previous_response_id").is_none());
+        let input = body["input"].as_array().unwrap();
+        assert!(input.len() >= original.len());
+        assert_eq!(
+            protocol::HistoryDigest::from_items(&input[..original.len()]),
+            original_digest
+        );
+        assert!(input.iter().any(|item| item["type"] == "function_call"
+            && item["call_id"] == tool["call_id"]
+            && item["name"] == tool["name"]
+            && item["arguments"] == tool["arguments"]));
+        let outputs: Vec<_> = input
+            .iter()
+            .filter(|item| item["type"] == "function_call_output")
+            .collect();
+        assert_eq!(
+            outputs
+                .iter()
+                .map(|item| item["call_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["router_tool", "router_tool-http"][..round + 1]
+        );
+        assert!(outputs.iter().all(|output| input
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["call_id"] == output["call_id"])));
+        assert_eq!(
+            protocol::HistoryDigest::from_items(std::slice::from_ref(outputs[0])),
+            failed_output_digest,
+            "the original tool result must survive both HTTP rounds"
+        );
+    }
+    let mut rows = Vec::new();
+    while let Ok(row) = logs.try_recv() {
+        if row.status.is_some() {
+            rows.push(row);
+        }
+    }
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.status.unwrap())
+            .collect::<Vec<_>>(),
+        [200, 400, 200, 200]
+    );
+    let owner = generations[0]
+        .1
+        .pointer("/client_metadata/x-codex-turn-metadata")
+        .and_then(Value::as_str)
+        .and_then(protocol::Owner::parse);
+    if owner.is_some() {
+        assert!(
+            rows[2]
+                .special_settings_json
+                .as_deref()
+                .unwrap_or_default()
+                .contains("recovery_from_trace_id"),
+            "identified CLI must claim the original recovery budget"
+        );
+    }
+    println!(
+        "{} → AIO 426 → two HTTP tool rounds: passed; each tool executed once; recovery owner={}",
+        String::from_utf8_lossy(&version.stdout).trim(),
+        owner.is_some()
+    );
+}
+
 #[derive(Clone, Default)]
 struct CliTwoTurnStub {
     connections: Arc<std::sync::atomic::AtomicUsize>,
@@ -1536,7 +2017,7 @@ impl CliTwoTurnStub {
                 events("summary")
             }
         } else if generation == if self.auto_compact { 1 } else { 2 } {
-            let item = cli_tool_item(&body);
+            let item = cli_tool_item(&body, "");
             let mut output = vec![
                 json!({"type":"response.output_item.done","item":item}),
                 json!({"type":"response.completed","response":{"id":"resp-tool","status":"completed","output":[item]}}),
@@ -1724,7 +2205,15 @@ async fn recv_until(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     expected: &str,
 ) -> Value {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    recv_until_with_timeout(socket, expected, Duration::from_secs(3)).await
+}
+
+async fn recv_until_with_timeout(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    expected: &str,
+    timeout: Duration,
+) -> Value {
+    tokio::time::timeout(timeout, async {
         while let Some(message) = socket.next().await {
             match message.unwrap() {
                 Message::Text(text) => {
@@ -1741,7 +2230,7 @@ async fn recv_until(
         panic!("EOF before {expected}")
     })
     .await
-    .expect("expected downstream event")
+    .unwrap_or_else(|_| panic!("expected downstream event {expected} within {timeout:?}"))
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1793,7 +2282,7 @@ async fn completed_turn_compaction_starts_fresh_generation_on_ws_and_http() {
             if generation == 1 {
                 body["input"] = if http {
                     let mut history = body["input"].as_array().unwrap().clone();
-                    history.extend([cli_tool_item(&body), tool_output.clone()]);
+                    history.extend([cli_tool_item(&body, ""), tool_output.clone()]);
                     json!(history)
                 } else {
                     body["previous_response_id"] = json!("resp-tool");
@@ -2141,6 +2630,8 @@ async fn full_input_recovery_after_attempt_deadline_uses_remaining_provider_budg
     socket.send(Message::Text(body.to_string())).await.unwrap();
     let error = recv_until(&mut socket, "error").await;
     assert_eq!(error["error"]["code"], "previous_response_not_found");
+    let mut retry = connect(&gateway, "expired-attempt-recovery").await.unwrap();
+    retry.close(None).await.unwrap();
     assert!(terminal_log(&mut logs)
         .await
         .special_settings_json

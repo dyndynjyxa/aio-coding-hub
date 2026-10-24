@@ -34,6 +34,54 @@ describe("components/home/requestLogErrorDetails", () => {
     expect(resolveRequestLogErrorObservation(createRequestLogDetail())).toBeNull();
   });
 
+  it("uses the audit marker for full-input retry and does not invent an upstream 400", () => {
+    const log = createRequestLogDetail({
+      cli_key: "codex",
+      status: 400,
+      error_code: GatewayErrorCodes.REQUEST_REJECTED,
+      error_details_json: JSON.stringify({
+        error_category: "context",
+        reason_code: "previous_response_not_found",
+        reason: "Response context is unavailable; resend the full input",
+      }),
+      special_settings_json: JSON.stringify([
+        {
+          type: "codex_responses_transport",
+          scope: "attempt",
+          transport_action: "full_input_retry",
+          reason_code: "previous_response_not_found",
+          output_committed: false,
+        },
+      ]),
+    });
+
+    expect(resolveRequestLogErrorObservation(log)).toMatchObject({
+      isFullInputRetry: true,
+      displayErrorCode: GatewayErrorCodes.REQUEST_REJECTED,
+      upstreamStatus: null,
+      reasonCode: "previous_response_not_found",
+      gwDescription: {
+        desc: "网关已要求客户端重发完整输入",
+        suggestion: "支持自动恢复的客户端会重发完整输入；恢复结果请查看后续请求。",
+      },
+    });
+    for (const specialSettings of [
+      null,
+      [{ type: "codex_responses_transport", reason_code: "previous_response_not_found" }],
+      [{ type: "codex_responses_transport", transport_action: "full_input_retry" }],
+    ]) {
+      expect(
+        resolveRequestLogErrorObservation({
+          ...log,
+          special_settings_json: specialSettings == null ? null : JSON.stringify(specialSettings),
+        })
+      ).toMatchObject({
+        isFullInputRetry: false,
+        gwDescription: { desc: "请求或上下文恢复校验未通过" },
+      });
+    }
+  });
+
   it.each(["upstream", "local"])("parses explicit error details (%s)", (errorCategory) => {
     const observation = resolveRequestLogErrorObservation(
       createRequestLogDetail({

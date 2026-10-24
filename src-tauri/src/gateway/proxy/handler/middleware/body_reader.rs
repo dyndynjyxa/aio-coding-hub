@@ -34,17 +34,7 @@ impl BodyReaderMiddleware {
             .expect("request_body must be set before BodyReaderMiddleware");
         ctx.headers.remove("x-aio-provider-id");
 
-        let managed_recovery = ctx.cli_key == "codex"
-            && ctx
-                .headers
-                .get(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER)
-                .and_then(|value| value.to_str().ok())
-                .is_some_and(|value| value.starts_with("aio-ws-"));
-        let request_body_limit = if managed_recovery || ctx.ws_connection.is_some() {
-            max_request_body_bytes().min(crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES)
-        } else {
-            max_request_body_bytes()
-        };
+        let request_body_limit = max_request_body_bytes();
         match to_bytes(body, request_body_limit).await {
             Ok(bytes) => {
                 ctx.body_bytes = bytes;
@@ -179,16 +169,6 @@ impl BodyReaderMiddleware {
                     }
                 }
             }
-            if ctx.ws_request.is_some()
-                && ctx.body_bytes.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
-            {
-                return MiddlewareAction::ShortCircuit(
-                    axum::response::IntoResponse::into_response((
-                        StatusCode::PAYLOAD_TOO_LARGE,
-                        "Managed Responses recovery exceeds byte limit",
-                    )),
-                );
-            }
             if let Some(request) = &ctx.ws_request {
                 use crate::shared::mutex_ext::MutexExt;
                 let mut generation = request.generation.lock_or_recover();
@@ -252,16 +232,6 @@ impl BodyReaderMiddleware {
                             .unwrap_or_else(|_| axum::http::HeaderValue::from_static("unknown")),
                     );
                     return MiddlewareAction::ShortCircuit(resp);
-                }
-                if (ctx.ws_request.is_some() || ctx.ws_connection.is_some())
-                    && output.body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
-                {
-                    return MiddlewareAction::ShortCircuit(
-                        axum::response::IntoResponse::into_response((
-                            StatusCode::PAYLOAD_TOO_LARGE,
-                            "Managed Responses plugin output exceeds byte limit",
-                        )),
-                    );
                 }
                 ctx.headers = output.headers;
                 request_body_state.replace_decoded(output.body);

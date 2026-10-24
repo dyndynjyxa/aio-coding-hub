@@ -120,9 +120,11 @@ const RequestLogCard = memo(function RequestLogCard({
         title: "请求未完成：历史日志缺少终态，当前网关没有对应的进行中请求",
         isError: false,
         isClientAbort: false,
+        isFullInputRetry: false,
         hasFailover: log.has_failover,
       }
     : computeStatusBadge({
+        cliKey: log.cli_key,
         status: log.status,
         errorCode: log.error_code,
         hasFailover: log.has_failover,
@@ -229,6 +231,8 @@ const RequestLogCard = memo(function RequestLogCard({
               >
                 {isInterrupted ? (
                   <Clock className="h-3 w-3 shrink-0" />
+                ) : statusBadge.isFullInputRetry ? (
+                  <RefreshCw className="h-3 w-3 shrink-0" aria-hidden="true" />
                 ) : statusBadge.isError ? (
                   <XCircle className="h-3 w-3 shrink-0" />
                 ) : (
@@ -280,7 +284,7 @@ const RequestLogCard = memo(function RequestLogCard({
 
               {isFree && <FreeBadge />}
 
-              {log.error_code && (
+              {log.error_code && !statusBadge.isFullInputRetry && (
                 <span className="shrink-0 whitespace-nowrap rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                   {getErrorCodeLabel(log.error_code)}
                 </span>
