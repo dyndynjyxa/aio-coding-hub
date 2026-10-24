@@ -9,6 +9,8 @@ use crate::shared::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 pub(super) const PROFILE_ID: &str = "00000000-0000-4000-8000-000000a10d35";
 const PROFILE_NAME: &str = "AIO Coding Hub";
@@ -21,6 +23,38 @@ const FALLBACK_MODELS: [&str; 4] = [
     "claude-fable-5",
     "claude-haiku-4-5",
 ];
+
+static CONFIG_TRANSACTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static CONFIG_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn transaction_lock() -> AppResult<MutexGuard<'static, ()>> {
+    CONFIG_TRANSACTION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "CLAUDE_DESKTOP_CONFIG_LOCK_POISONED".into())
+}
+
+pub(super) fn bump_config_generation_unlocked() {
+    CONFIG_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(super) struct ModelRefreshIdentity {
+    profile_path: PathBuf,
+    base_origin: String,
+    generation: u64,
+}
+
+/// Capture while holding `transaction_lock`; model queries run outside it.
+pub(super) fn model_refresh_identity_unlocked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    base_origin: &str,
+) -> AppResult<ModelRefreshIdentity> {
+    Ok(ModelRefreshIdentity {
+        profile_path: paths(app)?.profile,
+        base_origin: base_origin.to_string(),
+        generation: CONFIG_GENERATION.load(Ordering::Relaxed),
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DesktopModel {
@@ -213,13 +247,37 @@ fn has_current_model_list(profile: &Value) -> bool {
 pub(super) fn refresh_inference_models<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
+    identity: ModelRefreshIdentity,
 ) -> AppResult<bool> {
-    let paths = paths(app)?;
-    let Some(current) = read_optional_cli_proxy_file(&paths.profile)? else {
+    let models = load_models(app, db)?;
+    commit_model_refresh_if_active(app, &identity, &models)
+}
+
+pub(super) fn commit_model_refresh_if_active<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    identity: &ModelRefreshIdentity,
+    models: &[DesktopModel],
+) -> AppResult<bool> {
+    let _transaction = transaction_lock()?;
+    if CONFIG_GENERATION.load(Ordering::Relaxed) != identity.generation
+        || paths(app)?.profile != identity.profile_path
+    {
+        return Ok(false);
+    }
+    let still_active = super::read_manifest(app, "claude_desktop")?.is_some_and(|manifest| {
+        manifest.enabled
+            && manifest.pending_apply.is_none()
+            && manifest.base_origin.as_deref() == Some(identity.base_origin.as_str())
+    });
+    if !still_active || !is_applied(app, &identity.base_origin) {
+        return Ok(false);
+    }
+
+    let Some(current) = read_optional_cli_proxy_file(&identity.profile_path)? else {
         return Ok(false);
     };
     let mut value = object_from_bytes(Some(current), "desktop_profile")?;
-    let models = inference_models(&load_models(app, db)?);
+    let models = inference_models(models);
     if value.get("inferenceModels") == Some(&models) {
         return Ok(false);
     }
@@ -227,7 +285,7 @@ pub(super) fn refresh_inference_models<R: tauri::Runtime>(
         .as_object_mut()
         .expect("validated object")
         .insert("inferenceModels".into(), models);
-    write_cli_proxy_file_atomic(&paths.profile, &json_bytes(&value)?)?;
+    write_cli_proxy_file_atomic(&identity.profile_path, &json_bytes(&value)?)?;
     Ok(true)
 }
 
@@ -503,11 +561,16 @@ pub(super) fn build_target(
             });
         }
         "desktop_meta" => {
-            let mut entries = object
-                .get("entries")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
+            let mut entries = match object.get("entries") {
+                None => Vec::new(),
+                Some(Value::Array(entries)) => entries.clone(),
+                Some(_) => {
+                    return Err(
+                        "CLAUDE_DESKTOP_INVALID_CONFIG: desktop_meta entries must be an array"
+                            .into(),
+                    );
+                }
+            };
             entries.retain(|entry| entry.get("id").and_then(Value::as_str) != Some(PROFILE_ID));
             entries.push(json!({"id": PROFILE_ID, "name": PROFILE_NAME}));
             object.insert("entries".into(), Value::Array(entries));
@@ -660,7 +723,11 @@ pub(super) fn merge_restore(kind: &str, target: &Path, backup: Option<&Path>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::cli_proxy as proxy;
     use std::ffi::OsString;
+
+    const ORIGIN: &str = "http://127.0.0.1:37123";
+    const NEW_ORIGIN: &str = "http://127.0.0.1:37124";
 
     struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
@@ -685,6 +752,411 @@ mod tests {
             }
             crate::test_support::clear_settings_cache();
         }
+    }
+
+    fn with_desktop(test: impl FnOnce(&tauri::AppHandle<tauri::test::MockRuntime>, DesktopPaths)) {
+        let _lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let mut env = EnvRestore::new();
+        env.set("AIO_CODING_HUB_HOME_DIR", temp.path());
+        env.set(
+            "AIO_CODING_HUB_DOTDIR_NAME",
+            Path::new(".aio-desktop-regression"),
+        );
+        env.set("CLAUDE_USER_DATA_DIR", &temp.path().join("Claude-3p"));
+        crate::test_support::clear_settings_cache();
+
+        let app = tauri::test::mock_app();
+        let resolved = paths(app.handle()).unwrap();
+        std::fs::create_dir_all(resolved.meta.parent().unwrap()).unwrap();
+        std::fs::write(
+            &resolved.threep,
+            br#"{"deploymentMode":"1p","preferences":{"theme":"light"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &resolved.meta,
+            br#"{"appliedId":"other","entries":[{"id":"other","name":"Other"}]}"#,
+        )
+        .unwrap();
+        test(app.handle(), resolved);
+    }
+
+    fn read_json(path: &Path) -> Value {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    fn capture_refresh(app: &tauri::AppHandle<tauri::test::MockRuntime>) -> ModelRefreshIdentity {
+        let _transaction = transaction_lock().unwrap();
+        model_refresh_identity_unlocked(app, ORIGIN).unwrap()
+    }
+
+    // Reproduce each crash boundary using the same manifest and file builders.
+    fn interrupt_apply(
+        app: &tauri::AppHandle<tauri::test::MockRuntime>,
+        base_origin: &str,
+        written_files: usize,
+    ) {
+        let _transaction = transaction_lock().unwrap();
+        let mut manifest = proxy::read_manifest(app, "claude_desktop")
+            .unwrap()
+            .unwrap_or_else(|| {
+                let mut manifest =
+                    proxy::backup_for_enable(app, "claude_desktop", base_origin, None).unwrap();
+                manifest.enabled = false;
+                manifest
+            });
+        manifest.pending_apply = Some(base_origin.to_string());
+        proxy::write_manifest(app, "claude_desktop", &manifest).unwrap();
+        bump_config_generation_unlocked();
+        let models = model_list(None, &[]);
+        for target in proxy::target_files(app, "claude_desktop")
+            .unwrap()
+            .into_iter()
+            .take(written_files)
+        {
+            let bytes = build_target(
+                target.kind,
+                read_optional_cli_proxy_file(&target.path).unwrap(),
+                base_origin,
+                &models,
+            )
+            .unwrap();
+            write_cli_proxy_file_atomic(&target.path, &bytes).unwrap();
+        }
+    }
+
+    #[test]
+    fn stale_model_refresh_is_discarded_after_lifecycle_changes() {
+        for action in [
+            "port",
+            "disable",
+            "exit",
+            "reenable",
+            "deferred_port",
+            "directory",
+            "profile_selection",
+            "pending_apply",
+        ] {
+            with_desktop(|app, resolved| {
+                assert!(
+                    proxy::set_enabled(app, "claude_desktop", true, ORIGIN)
+                        .unwrap()
+                        .ok
+                );
+                let identity = capture_refresh(app);
+                match action {
+                    "port" => {
+                        let results = proxy::sync_enabled(app, NEW_ORIGIN, true).unwrap();
+                        assert!(results.iter().all(|result| result.ok));
+                        assert!(is_applied(app, NEW_ORIGIN));
+                    }
+                    "disable" | "reenable" => {
+                        assert!(
+                            proxy::set_enabled(app, "claude_desktop", false, ORIGIN)
+                                .unwrap()
+                                .ok
+                        );
+                        if action == "reenable" {
+                            assert!(
+                                proxy::set_enabled(app, "claude_desktop", true, ORIGIN)
+                                    .unwrap()
+                                    .ok
+                            );
+                        }
+                    }
+                    "exit" => {
+                        let results = proxy::restore_enabled_keep_state(app).unwrap();
+                        assert!(results.iter().all(|result| result.ok));
+                        assert!(proxy::is_enabled(app, "claude_desktop").unwrap());
+                    }
+                    "deferred_port" => {
+                        for origin in [NEW_ORIGIN, ORIGIN] {
+                            let results = proxy::sync_enabled(app, origin, false).unwrap();
+                            assert!(results.iter().all(|result| result.ok));
+                        }
+                    }
+                    "directory" => {
+                        std::env::set_var(
+                            "CLAUDE_USER_DATA_DIR",
+                            resolved.threep.parent().unwrap().join("different"),
+                        );
+                    }
+                    "profile_selection" => {
+                        let mut meta = read_json(&resolved.meta);
+                        meta["appliedId"] = json!("other");
+                        std::fs::write(&resolved.meta, json_bytes(&meta).unwrap()).unwrap();
+                    }
+                    "pending_apply" => {
+                        let mut manifest = proxy::read_manifest(app, "claude_desktop")
+                            .unwrap()
+                            .unwrap();
+                        manifest.pending_apply = Some(ORIGIN.into());
+                        proxy::write_manifest(app, "claude_desktop", &manifest).unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                let before = read_optional_cli_proxy_file(&resolved.profile).unwrap();
+                assert!(
+                    !commit_model_refresh_if_active(
+                        app,
+                        &identity,
+                        &[DesktopModel {
+                            id: "stale-model".into(),
+                            supports_1m: false,
+                        }],
+                    )
+                    .unwrap(),
+                    "{action}"
+                );
+                assert_eq!(
+                    read_optional_cli_proxy_file(&resolved.profile).unwrap(),
+                    before,
+                    "{action}"
+                );
+                if action == "directory" {
+                    assert!(!paths(app).unwrap().profile.exists());
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn fresh_model_refresh_reads_current_profile_and_updates_only_models() {
+        with_desktop(|app, resolved| {
+            assert!(
+                proxy::set_enabled(app, "claude_desktop", true, ORIGIN)
+                    .unwrap()
+                    .ok
+            );
+            let identity = capture_refresh(app);
+            let mut current = read_json(&resolved.profile);
+            current["userAutoMode"] = json!(true);
+            std::fs::write(&resolved.profile, json_bytes(&current).unwrap()).unwrap();
+
+            let models = [DesktopModel {
+                id: "new-model".into(),
+                supports_1m: false,
+            }];
+            assert!(commit_model_refresh_if_active(app, &identity, &models).unwrap());
+            current["inferenceModels"] = inference_models(&models);
+            assert_eq!(read_json(&resolved.profile), current);
+            assert!(!commit_model_refresh_if_active(app, &identity, &models).unwrap());
+
+            let db = crate::db::init(app).unwrap();
+            assert!(proxy::refresh_claude_desktop_models_if_enabled(app, &db).unwrap());
+            current["inferenceModels"] = inference_models(&model_list(None, &[]));
+            assert_eq!(read_json(&resolved.profile), current);
+            assert!(!proxy::refresh_claude_desktop_models_if_enabled(app, &db).unwrap());
+        });
+    }
+
+    #[test]
+    fn startup_recovers_each_interrupted_desktop_apply_boundary() {
+        for resume in [false, true] {
+            for written_files in 0..=3 {
+                with_desktop(|app, resolved| {
+                    if resume {
+                        assert!(
+                            proxy::set_enabled(app, "claude_desktop", true, ORIGIN)
+                                .unwrap()
+                                .ok
+                        );
+                        assert!(proxy::restore_enabled_keep_state(app)
+                            .unwrap()
+                            .iter()
+                            .all(|result| result.ok));
+                    }
+                    interrupt_apply(app, NEW_ORIGIN, written_files);
+                    let mut config = read_json(&resolved.threep);
+                    config["preferences"]["theme"] = json!("dark");
+                    config["mcpServers"] = json!({"user-server": {"command": "node"}});
+                    std::fs::write(&resolved.threep, json_bytes(&config).unwrap()).unwrap();
+                    let mut meta = read_json(&resolved.meta);
+                    meta["entries"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({"id": "user", "name": "User"}));
+                    std::fs::write(&resolved.meta, json_bytes(&meta).unwrap()).unwrap();
+
+                    let results = proxy::startup_repair_incomplete_enable(app).unwrap();
+                    assert_eq!(results.len(), 1);
+                    assert!(results[0].ok, "{}", results[0].message);
+                    let manifest = proxy::read_manifest(app, "claude_desktop")
+                        .unwrap()
+                        .unwrap();
+                    assert!(manifest.pending_apply.is_none());
+                    assert_eq!(manifest.enabled, written_files == 3);
+                    let config = read_json(&resolved.threep);
+                    let meta = read_json(&resolved.meta);
+                    assert_eq!(config["preferences"]["theme"], "dark");
+                    assert_eq!(config["mcpServers"]["user-server"]["command"], "node");
+                    assert!(meta["entries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry["id"] == "user"));
+                    if written_files == 3 {
+                        assert!(is_applied(app, NEW_ORIGIN));
+                        assert_eq!(manifest.base_origin.as_deref(), Some(NEW_ORIGIN));
+                    } else {
+                        assert_eq!(config["deploymentMode"], "1p");
+                        assert_eq!(meta["appliedId"], "other");
+                        assert!(!resolved.profile.exists());
+                    }
+                    assert!(proxy::startup_repair_incomplete_enable(app)
+                        .unwrap()
+                        .is_empty());
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn complete_desktop_apply_leaves_recoverable_marker_until_manifest_commit() {
+        with_desktop(|app, _| {
+            {
+                let _transaction = transaction_lock().unwrap();
+                let mut manifest =
+                    proxy::backup_for_enable(app, "claude_desktop", ORIGIN, None).unwrap();
+                manifest.enabled = false;
+                proxy::write_manifest(app, "claude_desktop", &manifest).unwrap();
+                proxy::apply_proxy_config(app, "claude_desktop", ORIGIN).unwrap();
+            }
+            let manifest = proxy::read_manifest(app, "claude_desktop")
+                .unwrap()
+                .unwrap();
+            assert!(!manifest.enabled);
+            assert_eq!(manifest.pending_apply.as_deref(), Some(ORIGIN));
+            let results = proxy::startup_repair_incomplete_enable(app).unwrap();
+            assert_eq!(results.len(), 1);
+            assert!(results[0].ok);
+            assert!(results[0].enabled);
+            assert!(is_applied(app, ORIGIN));
+        });
+    }
+
+    #[test]
+    fn failed_desktop_recovery_keeps_marker_and_can_retry() {
+        with_desktop(|app, resolved| {
+            interrupt_apply(app, ORIGIN, 2);
+            let root = proxy::cli_proxy_root_dir(app, "claude_desktop").unwrap();
+            let backup = proxy::cli_proxy_files_dir(&root).join("meta.json");
+            let original = std::fs::read(&backup).unwrap();
+            std::fs::remove_file(&backup).unwrap();
+
+            let results = proxy::startup_repair_incomplete_enable(app).unwrap();
+            assert_eq!(results.len(), 1);
+            assert!(!results[0].ok);
+            assert_eq!(
+                proxy::read_manifest(app, "claude_desktop")
+                    .unwrap()
+                    .unwrap()
+                    .pending_apply
+                    .as_deref(),
+                Some(ORIGIN)
+            );
+            std::fs::write(&backup, original).unwrap();
+            let results = proxy::startup_repair_incomplete_enable(app).unwrap();
+            assert_eq!(results.len(), 1);
+            assert!(results[0].ok, "{}", results[0].message);
+            assert!(!results[0].enabled);
+            assert!(!resolved.profile.exists());
+            assert_eq!(read_json(&resolved.threep)["deploymentMode"], "1p");
+            assert_eq!(read_json(&resolved.meta)["appliedId"], "other");
+            assert!(proxy::read_manifest(app, "claude_desktop")
+                .unwrap()
+                .unwrap()
+                .pending_apply
+                .is_none());
+        });
+    }
+
+    #[test]
+    fn lifecycle_recovers_pending_apply_before_backing_up_or_syncing() {
+        for action in ["enable", "disable", "sync", "exit"] {
+            with_desktop(|app, resolved| {
+                assert!(
+                    proxy::set_enabled(app, "claude_desktop", true, ORIGIN)
+                        .unwrap()
+                        .ok
+                );
+                interrupt_apply(app, NEW_ORIGIN, 1);
+                match action {
+                    "enable" | "disable" => {
+                        let result = proxy::set_enabled(
+                            app,
+                            "claude_desktop",
+                            action == "enable",
+                            NEW_ORIGIN,
+                        )
+                        .unwrap();
+                        assert!(result.ok, "{}", result.message);
+                    }
+                    "sync" => {
+                        let results = proxy::sync_enabled(app, NEW_ORIGIN, true).unwrap();
+                        assert!(results.iter().all(|result| result.ok));
+                    }
+                    "exit" => {
+                        let results = proxy::restore_enabled_keep_state(app).unwrap();
+                        assert!(results.iter().all(|result| result.ok));
+                    }
+                    _ => unreachable!(),
+                }
+                if action == "enable" {
+                    assert!(is_applied(app, NEW_ORIGIN));
+                    assert!(
+                        proxy::set_enabled(app, "claude_desktop", false, NEW_ORIGIN)
+                            .unwrap()
+                            .ok
+                    );
+                }
+                assert_eq!(read_json(&resolved.threep)["deploymentMode"], "1p");
+                assert_eq!(read_json(&resolved.meta)["appliedId"], "other");
+                assert!(!resolved.profile.exists());
+                let manifest = proxy::read_manifest(app, "claude_desktop")
+                    .unwrap()
+                    .unwrap();
+                assert!(!manifest.enabled);
+                assert!(manifest.pending_apply.is_none());
+            });
+        }
+    }
+
+    #[test]
+    fn malformed_meta_entries_reject_enable_before_any_client_write() {
+        for entries in [
+            json!({"existing": {"name": "User"}}),
+            json!("invalid"),
+            Value::Null,
+        ] {
+            with_desktop(|app, resolved| {
+                let meta = json_bytes(&json!({"entries": entries})).unwrap();
+                std::fs::write(&resolved.meta, &meta).unwrap();
+                let config = std::fs::read(&resolved.threep).unwrap();
+                let profile = br#"{"userAutoMode":true}"#;
+                std::fs::write(&resolved.profile, profile).unwrap();
+
+                let result = proxy::set_enabled(app, "claude_desktop", true, ORIGIN).unwrap();
+                assert!(!result.ok);
+                assert!(result.message.contains("entries must be an array"));
+                assert_eq!(std::fs::read(&resolved.meta).unwrap(), meta);
+                assert_eq!(std::fs::read(&resolved.threep).unwrap(), config);
+                assert_eq!(std::fs::read(&resolved.profile).unwrap(), profile);
+                let manifest = proxy::read_manifest(app, "claude_desktop")
+                    .unwrap()
+                    .unwrap();
+                assert!(!manifest.enabled);
+                assert!(manifest.pending_apply.is_none());
+            });
+        }
+        let meta: Value =
+            serde_json::from_slice(&build_target("desktop_meta", None, ORIGIN, &[]).unwrap())
+                .unwrap();
+        assert_eq!(
+            meta["entries"],
+            json!([{"id": PROFILE_ID, "name": PROFILE_NAME}])
+        );
     }
 
     #[test]
@@ -901,6 +1373,7 @@ mod tests {
         env.set("LOCALAPPDATA", temp.path());
         env.set("XDG_CONFIG_HOME", temp.path());
         env.set("AIO_CODING_HUB_HOME_DIR", temp.path());
+        env.set("CLAUDE_USER_DATA_DIR", &temp.path().join("Claude-3p"));
         env.set(
             "AIO_CODING_HUB_DOTDIR_NAME",
             std::path::Path::new(".aio-test"),

@@ -151,6 +151,7 @@ fn write_cli_proxy_manifest<R: tauri::Runtime>(
             cli_key: cli_key.to_string(),
             enabled,
             base_origin: base_origin.map(str::to_string),
+            pending_apply: None,
             created_at: 1,
             updated_at: 1,
             files: Vec::new(),
@@ -1483,6 +1484,7 @@ fn restore_backups_exactly_rejects_oversized_backup_file() {
         cli_key: "codex".to_string(),
         enabled: true,
         base_origin: Some("http://127.0.0.1:37123".to_string()),
+        pending_apply: None,
         created_at: 1,
         updated_at: 1,
         files: vec![BackupFileEntry {

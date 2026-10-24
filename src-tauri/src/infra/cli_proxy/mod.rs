@@ -116,6 +116,8 @@ struct CliProxyManifest {
     cli_key: String,
     enabled: bool,
     base_origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_apply: Option<String>,
     created_at: i64,
     updated_at: i64,
     files: Vec<BackupFileEntry>,
@@ -474,6 +476,22 @@ fn apply_proxy_config<R: tauri::Runtime>(
         prepared_writes.push((t.path, bytes));
     }
 
+    if cli_key == "claude_desktop" {
+        for (path, bytes) in &prepared_writes {
+            ensure_cli_proxy_bytes_len(
+                bytes,
+                CLI_PROXY_FILE_MAX_BYTES,
+                &format!("CLI proxy file {}", path.display()),
+            )?;
+        }
+        let mut manifest = read_manifest(app, cli_key)?
+            .ok_or("CLAUDE_DESKTOP_NO_BACKUP: cannot apply without a recovery manifest")?;
+        manifest.pending_apply = Some(base_origin.to_string());
+        manifest.updated_at = now_unix_seconds();
+        write_manifest(app, cli_key, &manifest)?;
+        claude_desktop::bump_config_generation_unlocked();
+    }
+
     for (path, bytes) in prepared_writes {
         ensure_cli_proxy_bytes_len(
             &bytes,
@@ -523,16 +541,23 @@ pub(crate) fn refresh_claude_desktop_models_if_enabled<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
 ) -> crate::shared::error::AppResult<bool> {
-    let Some(manifest) = read_manifest(app, "claude_desktop")? else {
-        return Ok(false);
+    let identity = {
+        let _transaction = claude_desktop::transaction_lock()?;
+        let Some(manifest) = read_manifest(app, "claude_desktop")? else {
+            return Ok(false);
+        };
+        let Some(base_origin) = manifest.base_origin.as_deref() else {
+            return Ok(false);
+        };
+        if !manifest.enabled
+            || manifest.pending_apply.is_some()
+            || !is_proxy_config_applied(app, "claude_desktop", base_origin)
+        {
+            return Ok(false);
+        }
+        claude_desktop::model_refresh_identity_unlocked(app, base_origin)?
     };
-    let Some(base_origin) = manifest.base_origin.as_deref() else {
-        return Ok(false);
-    };
-    if !manifest.enabled || !is_proxy_config_applied(app, "claude_desktop", base_origin) {
-        return Ok(false);
-    }
-    claude_desktop::refresh_inference_models(app, db)
+    claude_desktop::refresh_inference_models(app, db, identity)
 }
 
 // -- Dispatch: restore_from_manifest ----------------------------------------
@@ -550,6 +575,9 @@ fn restore_from_manifest<R: tauri::Runtime>(
     };
     if cli_key == "codex" {
         codex::bump_config_generation_unlocked();
+    }
+    if cli_key == "claude_desktop" {
+        claude_desktop::bump_config_generation_unlocked();
     }
     let original_aio_catalog_existed = manifest
         .files
@@ -639,6 +667,33 @@ fn restore_from_manifest<R: tauri::Runtime>(
     }
 
     Ok(())
+}
+
+/// The caller holds the Desktop transaction lock. A complete apply only needs
+/// its enabled state committed; a partial one returns to the saved direct state.
+fn recover_desktop_pending_apply<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    manifest: &mut CliProxyManifest,
+) -> crate::shared::error::AppResult<bool> {
+    if manifest.cli_key != "claude_desktop" {
+        return Ok(false);
+    }
+    let Some(base_origin) = manifest.pending_apply.clone() else {
+        return Ok(false);
+    };
+    if !manifest_target_paths_changed(app, manifest)?
+        && is_proxy_config_applied(app, "claude_desktop", &base_origin)
+    {
+        manifest.enabled = true;
+        manifest.base_origin = Some(base_origin);
+    } else {
+        restore_from_manifest(app, manifest)?;
+        manifest.enabled = false;
+    }
+    manifest.pending_apply = None;
+    manifest.updated_at = now_unix_seconds();
+    write_manifest(app, "claude_desktop", manifest)?;
+    Ok(true)
 }
 
 // -- Shared backup / snapshot helpers ---------------------------------------
@@ -750,6 +805,7 @@ fn backup_for_enable<R: tauri::Runtime>(
         cli_key: cli_key.to_string(),
         enabled: true,
         base_origin: Some(base_origin.to_string()),
+        pending_apply: None,
         created_at,
         updated_at: now,
         files: entries,
@@ -1046,6 +1102,7 @@ fn build_manifest_from_captured(
         cli_key: existing.cli_key.clone(),
         enabled: existing.enabled,
         base_origin: Some(base_origin.to_string()),
+        pending_apply: None,
         created_at: existing.created_at,
         updated_at: now,
         files,
@@ -1082,6 +1139,7 @@ fn build_manifest_with_current_target_paths<R: tauri::Runtime>(
         cli_key: existing.cli_key.clone(),
         enabled: existing.enabled,
         base_origin: Some(base_origin.to_string()),
+        pending_apply: None,
         created_at: existing.created_at,
         updated_at: now,
         files,
@@ -1160,9 +1218,17 @@ pub fn set_enabled<R: tauri::Runtime>(
     } else {
         None
     };
+    let _desktop_transaction = if cli_key == "claude_desktop" {
+        Some(claude_desktop::transaction_lock()?)
+    } else {
+        None
+    };
 
     let trace_id = new_trace_id("cli-proxy");
-    let existing = read_manifest(app, cli_key)?;
+    let mut existing = read_manifest(app, cli_key)?;
+    if let Some(manifest) = existing.as_mut() {
+        recover_desktop_pending_apply(app, manifest)?;
+    }
 
     if enabled
         && cli_key == "claude_desktop"
@@ -1225,11 +1291,15 @@ pub fn set_enabled<R: tauri::Runtime>(
                 origin,
             ));
         }
+        if cli_key == "claude_desktop" && !should_backup {
+            write_manifest(app, cli_key, &manifest)?;
+        }
 
         return match apply_proxy_config(app, cli_key, base_origin) {
             Ok(()) => {
                 manifest.enabled = true;
                 manifest.base_origin = Some(base_origin.to_string());
+                manifest.pending_apply = None;
                 manifest.updated_at = now_unix_seconds();
                 if let Err(err) = write_manifest(app, cli_key, &manifest) {
                     return Ok(CliProxyResult::failure(
@@ -1261,8 +1331,21 @@ pub fn set_enabled<R: tauri::Runtime>(
                 // the invalid file is already preserved as .invalid-backup by
                 // apply_proxy_config, so restoring would clobber user changes.
                 if should_backup && !is_parse_error {
-                    let _ = restore_from_manifest(app, &manifest);
+                    let restored = restore_from_manifest(app, &manifest);
+                    if cli_key == "claude_desktop" {
+                        if let Err(restore_error) = restored {
+                            return Ok(CliProxyResult::failure(
+                                trace_id,
+                                cli_key,
+                                false,
+                                "CLI_PROXY_ENABLE_FAILED",
+                                format!("{err}; rollback failed: {restore_error}"),
+                                origin,
+                            ));
+                        }
+                    }
                     manifest.enabled = false;
+                    manifest.pending_apply = None;
                     manifest.updated_at = now_unix_seconds();
                     let _ = write_manifest(app, cli_key, &manifest);
                 }
@@ -1334,14 +1417,21 @@ fn for_each_manifest<R: tauri::Runtime>(
         let trace_id = new_trace_id(trace_label);
         let mut enabled = false;
         let mut base_origin = None;
-        let result = read_manifest(app, cli_key).and_then(|manifest| {
-            let Some(manifest) = manifest else {
-                return Ok(None);
+        let result = (|| {
+            let _desktop_transaction = if cli_key == "claude_desktop" {
+                Some(claude_desktop::transaction_lock()?)
+            } else {
+                None
             };
-            enabled = manifest.enabled;
-            base_origin = manifest.base_origin.clone();
-            run(cli_key, manifest, trace_id.clone())
-        });
+            read_manifest(app, cli_key).and_then(|manifest| {
+                let Some(manifest) = manifest else {
+                    return Ok(None);
+                };
+                enabled = manifest.enabled;
+                base_origin = manifest.base_origin.clone();
+                run(cli_key, manifest, trace_id.clone())
+            })
+        })();
         match result {
             Ok(Some(row)) => out.push(row),
             Ok(None) => {}
@@ -1366,6 +1456,20 @@ pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
         "cli-proxy-startup-repair",
         "CLI_PROXY_STARTUP_REPAIR_FAILED",
         |cli_key, mut manifest, trace_id| {
+            if recover_desktop_pending_apply(app, &mut manifest)? {
+                let message = if manifest.enabled {
+                    "启动自愈：已完成中断的 Claude Desktop 接管"
+                } else {
+                    "启动自愈：已回滚未完成的 Claude Desktop 接管"
+                };
+                return Ok(Some(CliProxyResult::success(
+                    trace_id,
+                    cli_key,
+                    manifest.enabled,
+                    message.to_string(),
+                    manifest.base_origin,
+                )));
+            }
             if manifest.enabled {
                 return Ok(None);
             }
@@ -1402,6 +1506,7 @@ pub fn sync_enabled<R: tauri::Runtime>(
         "cli-proxy-sync",
         "CLI_PROXY_SYNC_FAILED",
         |cli_key, mut manifest, trace_id| {
+            recover_desktop_pending_apply(app, &mut manifest)?;
             if !manifest.enabled {
                 return Ok(None);
             }
@@ -1460,6 +1565,9 @@ pub fn sync_enabled<R: tauri::Runtime>(
                 };
             if !apply_live {
                 if manifest_targets_added || manifest.base_origin.as_deref() != Some(base_origin) {
+                    if cli_key == "claude_desktop" {
+                        claude_desktop::bump_config_generation_unlocked();
+                    }
                     manifest.base_origin = Some(base_origin.to_string());
                     manifest.updated_at = now_unix_seconds();
                     write_manifest(app, cli_key, &manifest)?;
@@ -1500,8 +1608,12 @@ pub fn sync_enabled<R: tauri::Runtime>(
                     )));
                 }
             }
+            if cli_key == "claude_desktop" {
+                write_manifest(app, cli_key, &manifest)?;
+            }
             apply_proxy_config(app, cli_key, base_origin)?;
             manifest.base_origin = Some(base_origin.to_string());
+            manifest.pending_apply = None;
             manifest.updated_at = now_unix_seconds();
             write_manifest(app, cli_key, &manifest)?;
             Ok(Some(CliProxyResult::success(
@@ -1530,7 +1642,8 @@ pub fn restore_enabled_keep_state<R: tauri::Runtime>(
         app,
         "cli-proxy-restore",
         "CLI_PROXY_RESTORE_FAILED",
-        |cli_key, manifest, trace_id| {
+        |cli_key, mut manifest, trace_id| {
+            recover_desktop_pending_apply(app, &mut manifest)?;
             if !manifest.enabled {
                 return Ok(None);
             }
