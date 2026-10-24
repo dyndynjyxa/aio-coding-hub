@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.60.24](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.23...aio-coding-hub-v0.60.24) (2026-10-24)
+
+
+### Features
+
+* **claude-desktop:** 支持接管 Claude Desktop 第三方推理配置 ([#386](https://github.com/dyndynjyxa/aio-coding-hub/issues/386)) ([a871c41](https://github.com/dyndynjyxa/aio-coding-hub/commit/a871c41152431c11bdbfbb10dba5ee0901290ce0))
+* **oauth:** 增加账号窗口额度预估 ([#391](https://github.com/dyndynjyxa/aio-coding-hub/issues/391)) ([dfce555](https://github.com/dyndynjyxa/aio-coding-hub/commit/dfce555a998ad6062bff0e7b680a1c4cceb32ebc))
+
+
+### Bug Fixes
+
+* **gateway:** raise Responses WebSocket capacity to 20 ([44b3491](https://github.com/dyndynjyxa/aio-coding-hub/commit/44b3491c285f50e521c2f61378452fa972b86899))
+
 ## [0.60.23](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.22...aio-coding-hub-v0.60.23) (2026-10-17)
 
 
