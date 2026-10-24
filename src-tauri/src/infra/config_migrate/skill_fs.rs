@@ -41,12 +41,13 @@ pub(super) fn cli_skills_root<R: tauri::Runtime>(
     Ok(PathBuf::from(paths.cli_dir))
 }
 
-pub(super) fn local_skill_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
+pub(super) fn local_skill_dirs(cli_key: &str, root: &Path) -> AppResult<Vec<PathBuf>> {
     let mut items = Vec::new();
     if !root.exists() {
         return Ok(items);
     }
 
+    let builtins = crate::skills::BuiltinSkills::load(cli_key, root)?;
     let entries = std::fs::read_dir(root)
         .map_err(|e| format!("failed to read dir {}: {e}", root.display()))?;
     for entry in entries {
@@ -56,7 +57,9 @@ pub(super) fn local_skill_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
         let file_type = entry
             .file_type()
             .map_err(|e| format!("failed to read file type {}: {e}", path.display()))?;
-        if is_local_skill_dir(&path, &file_type) {
+        if is_local_skill_dir(&path, &file_type)
+            && !builtins.contains(&entry.file_name().to_string_lossy())
+        {
             items.push(path);
         }
     }

@@ -21,6 +21,11 @@ pub(crate) async fn sort_mode_delete(
 
     for cli_key in affected_cli_keys {
         app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
+        crate::app::provider_service::refresh_claude_desktop_models_after_routing_change(
+            &app,
+            &refresh_db,
+            &cli_key,
+        );
     }
     crate::app::provider_service::refresh_codex_catalog_after_routing_change(
         &app,
@@ -74,6 +79,11 @@ pub(crate) async fn sort_mode_providers_set_order(
         .await?;
 
     app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
+    crate::app::provider_service::refresh_claude_desktop_models_after_routing_change(
+        &app,
+        &refresh_db,
+        &cli_key,
+    );
     crate::app::provider_service::refresh_codex_catalog_after_routing_change(
         &app,
         refresh_db,
@@ -112,6 +122,11 @@ pub(crate) async fn sort_mode_provider_set_enabled(
         .await?;
 
     app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
+    crate::app::provider_service::refresh_claude_desktop_models_after_routing_change(
+        &app,
+        &refresh_db,
+        &cli_key,
+    );
     crate::app::provider_service::refresh_codex_catalog_after_routing_change(
         &app,
         refresh_db,

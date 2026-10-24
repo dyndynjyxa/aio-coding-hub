@@ -19,11 +19,10 @@ const MAX_RECOVERIES: usize = 128;
 // shortcut: retain 128 prior windows per turn; revisit if real turns exceed this compaction count.
 const MAX_PREVIOUS_CONTEXT_WINDOWS: usize = 128;
 const WS_COOLDOWN: Duration = Duration::from_secs(60);
-pub(in crate::gateway) const MAX_CONNECTIONS: usize = 4;
-// ponytail: fixed reservations admit two managed contexts; measure peaks before increasing concurrency.
-const RAW_BUFFER_BUDGET: usize = 256 * 1024 * 1024;
+pub(in crate::gateway) const MAX_CONNECTIONS: usize = 20;
+// shortcut: fixed reservations are not measured heap usage; measure peaks before increasing capacity again.
 const RAW_BUFFER_RESERVATION: u32 = 128 * 1024 * 1024;
-pub(in crate::gateway) const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const RAW_BUFFER_BUDGET: usize = MAX_CONNECTIONS * RAW_BUFFER_RESERVATION as usize;
 
 pub(in crate::gateway) struct Runtime {
     enabled: AtomicBool,
@@ -1383,8 +1382,11 @@ mod tests {
             .unwrap()
             .is_none());
 
-        // Both buffer reservations are occupied; result reading still works over HTTP.
-        let _other_connection = runtime.connection().unwrap();
+        // All buffer reservations are occupied; result reading still works over HTTP.
+        let _other_connections: Vec<_> = (1..MAX_CONNECTIONS)
+            .map(|_| runtime.connection().unwrap())
+            .collect();
+        assert_eq!(runtime.raw_buffers.available_permits(), 0);
         let headers = HeaderMap::from_iter([
             (axum::http::HeaderName::from_static(TURN_STATE_HEADER), nonce.parse().unwrap()),
             (axum::http::HeaderName::from_static("x-codex-turn-metadata"), json!({"session_id":"session","thread_id":"thread","window_id":"window","context_window_id":"context","turn_id":"turn"}).to_string().parse().unwrap()),
@@ -1666,13 +1668,13 @@ mod tests {
     #[test]
     fn connection_limit_http_hint_and_shutdown_are_local() {
         let runtime = Arc::new(Runtime::new(true));
-        let capacity = RAW_BUFFER_BUDGET / RAW_BUFFER_RESERVATION as usize;
-        let connections: Vec<_> = (0..capacity)
-            .map(|_| runtime.connection().unwrap())
-            .collect();
+        let mut connections: Vec<_> = (0..20).map(|_| runtime.connection().unwrap()).collect();
         assert_eq!(runtime.raw_buffers.available_permits(), 0);
-        assert!(runtime.connection().is_err());
-        drop(connections);
+        assert!(matches!(
+            runtime.connection(),
+            Err("Responses WebSocket connection limit reached")
+        ));
+        drop(connections.pop());
         assert!(runtime.connection().is_ok());
         runtime.force_http("window-a");
         assert!(runtime.prefers_http("window-a"));
@@ -1924,8 +1926,13 @@ mod tests {
             runtime.prepare_http_recovery(&bad_headers, &body_nonce, None),
             Err("invalid Codex turn metadata")
         ));
-        let other = runtime.connection().unwrap();
-        assert!(runtime.connection().is_err());
+        let others: Vec<_> = (1..MAX_CONNECTIONS)
+            .map(|_| runtime.connection().unwrap())
+            .collect();
+        assert!(matches!(
+            runtime.connection(),
+            Err("Responses WebSocket connection limit reached")
+        ));
         assert!(matches!(
             runtime.prepare_http_recovery(&headers, &body, None),
             Err("Responses WebSocket raw buffer budget exhausted")
@@ -1938,8 +1945,11 @@ mod tests {
             .unwrap_dispatch()
             .unwrap();
         assert!(recovered.generation.lock_or_recover().recovered);
-        assert!(runtime.connection().is_err());
-        drop(other);
+        assert!(matches!(
+            runtime.connection(),
+            Err("Responses WebSocket raw buffer budget exhausted")
+        ));
+        drop(others);
         drop(recovered);
         assert_eq!(runtime.raw_buffers.available_permits(), RAW_BUFFER_BUDGET);
     }
@@ -1990,10 +2000,12 @@ mod tests {
     fn raw_buffer_budget_is_shared_and_released_by_last_connection_owner() {
         let runtime = Arc::new(Runtime::new(true));
         let first = runtime.connection().unwrap();
-        let second = runtime.connection().unwrap();
+        let others: Vec<_> = (1..MAX_CONNECTIONS)
+            .map(|_| runtime.connection().unwrap())
+            .collect();
         assert_eq!(runtime.raw_buffers.available_permits(), 0);
         assert!(matches!(
-            runtime.connection(),
+            runtime.reserve_raw_buffers(),
             Err("Responses WebSocket raw buffer budget exhausted")
         ));
         let held = first.clone();
@@ -2009,7 +2021,7 @@ mod tests {
             runtime.raw_buffers.available_permits(),
             RAW_BUFFER_RESERVATION as usize
         );
-        drop(second);
+        drop(others);
         assert_eq!(runtime.raw_buffers.available_permits(), RAW_BUFFER_BUDGET);
     }
 }

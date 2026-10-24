@@ -606,7 +606,10 @@ fn unzip_repo_zip_with_limits(
         let file = archive
             .by_index(i)
             .map_err(|e| format!("SKILL_ZIP_ERROR: failed to read zip entry: {e}"))?;
-        let name = file.name().replace('\\', "/");
+        let name = file
+            .name()
+            .map_err(|e| format!("SKILL_ZIP_ERROR: failed to read zip entry name: {e}"))?
+            .replace('\\', "/");
         if name.is_empty() {
             continue;
         }

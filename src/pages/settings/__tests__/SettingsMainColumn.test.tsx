@@ -400,9 +400,15 @@ describe("pages/settings/SettingsMainColumn", () => {
       );
     });
 
-    expect(setCliPriorityOrder).toHaveBeenCalledWith(["gemini", "claude", "codex", "grok"]);
+    expect(setCliPriorityOrder).toHaveBeenCalledWith([
+      "gemini",
+      "claude",
+      "claude_desktop",
+      "codex",
+      "grok",
+    ]);
     expect(requestPersist).toHaveBeenCalledWith({
-      cli_priority_order: ["gemini", "claude", "codex", "grok"],
+      cli_priority_order: ["gemini", "claude", "claude_desktop", "codex", "grok"],
     });
   });
 

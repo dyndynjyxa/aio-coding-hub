@@ -104,6 +104,7 @@ export function RequestLogDetailDialog({
 
   const statusBadge = selectedLog
     ? computeStatusBadge({
+        cliKey: selectedLog.cli_key,
         status: selectedLog.status,
         errorCode: selectedLog.error_code,
         inProgress: isInProgress,

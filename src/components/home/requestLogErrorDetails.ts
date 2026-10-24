@@ -5,6 +5,7 @@ import {
 } from "../../constants/gatewayErrorCodes";
 import { parseAttemptsJson, type AttemptJsonEntry } from "../../services/gateway/attemptsJson";
 import type { RequestLogDetail } from "../../services/gateway/requestLogs";
+import { FULL_INPUT_RETRY_PRESENTATION, isCodexFullInputRetry } from "./requestLogPresentation";
 
 type ParsedReasonFields = {
   reason: string | null;
@@ -51,6 +52,7 @@ export type AttemptFailureGroup = {
 };
 
 export type RequestLogErrorObservation = {
+  isFullInputRetry?: boolean;
   attemptDurationMs: number | null;
   attemptFailureSummary: AttemptFailureGroup[] | null;
   circuitFailureCount: number | null;
@@ -315,7 +317,9 @@ export function resolveRequestLogErrorObservation(
   const parsedJson = parseErrorDetailsJson(selectedLog.error_details_json);
   const gatewayErrorCode = parsedJson.gatewayErrorCode ?? selectedLog.error_code ?? null;
   const displayErrorCode = parsedJson.errorCode ?? gatewayErrorCode;
+  const isFullInputRetry = isCodexFullInputRetry(selectedLog);
   const observation: RequestLogErrorObservation = {
+    isFullInputRetry,
     attemptDurationMs: parsedJson.attemptDurationMs,
     attemptFailureSummary: buildAttemptFailureSummary(parseAttemptsJson(selectedLog.attempts_json)),
     circuitFailureCount: parsedJson.circuitFailureCount,
@@ -326,7 +330,9 @@ export function resolveRequestLogErrorObservation(
     displayErrorCode,
     errorCategory: parsedJson.errorCategory,
     gatewayErrorCode,
-    gwDescription: lookupGatewayErrorDescription(displayErrorCode),
+    gwDescription: isFullInputRetry
+      ? FULL_INPUT_RETRY_PRESENTATION
+      : lookupGatewayErrorDescription(displayErrorCode),
     matchedRule: parsedJson.matchedRule,
     outcome: parsedJson.outcome,
     providerId: parsedJson.providerId,
@@ -341,7 +347,8 @@ export function resolveRequestLogErrorObservation(
     upstreamBodyPreview: parsedJson.upstreamBodyPreview,
     upstreamStatus:
       parsedJson.upstreamStatus ??
-      (parsedJson.errorCategory !== "local" &&
+      (!isFullInputRetry &&
+      parsedJson.errorCategory !== "local" &&
       selectedLog.status != null &&
       selectedLog.status >= 400
         ? selectedLog.status

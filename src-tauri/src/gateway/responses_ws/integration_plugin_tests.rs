@@ -315,6 +315,80 @@ fn counting_pipeline(calls: Arc<Mutex<Vec<GatewayPluginHookName>>>) -> Arc<Gatew
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn large_uploads_pass_through_ws_http_and_managed_recovery_with_plugins() {
+    let input_bytes = 9 * 1024 * 1024;
+    for transport in ["ws", "http", "recovery"] {
+        let fixture = Fixture::new(true).await;
+        let (stub, upstream) = Stub::start("large", Behavior::Complete).await;
+        fixture.provider("large", &upstream.origin(), transport == "ws");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (gateway, mut logs) = fixture
+            .start_with_pipeline(counting_pipeline(calls.clone()))
+            .await;
+        let Message::Text(create) = create_message(Some("large-upload")) else {
+            unreachable!()
+        };
+        let mut body: Value = serde_json::from_str(&create).unwrap();
+        body["input"][0]["content"][0]["text"] = json!("x".repeat(input_bytes));
+        if transport == "recovery" {
+            let owner = protocol::Owner::parse(
+                body["client_metadata"]["x-codex-turn-metadata"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            let nonce = fixture.runtime.issue_nonce(&owner).unwrap();
+            body["client_metadata"][protocol::TURN_STATE_HEADER] = json!(nonce);
+            body.as_object_mut().unwrap().remove("type");
+            body["stream"] = json!(true);
+            let response = reqwest::Client::new()
+                .post(format!("{}/v1/responses", gateway.origin()))
+                .header(protocol::TURN_STATE_HEADER, nonce)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response
+                .text()
+                .await
+                .unwrap()
+                .contains("response.completed"));
+        } else {
+            let mut socket = connect(&gateway, "large-upload").await.unwrap();
+            socket.send(Message::Text(body.to_string())).await.unwrap();
+            // Debug CI builds parse and rewrite 9 MiB through both request hooks.
+            let completed =
+                recv_until_with_timeout(&mut socket, "response.completed", Duration::from_secs(30))
+                    .await;
+            assert_eq!(completed["response"]["id"], "resp-large");
+            let _ = socket.close(None).await;
+        }
+        assert_eq!(
+            stub.transports(),
+            [if transport == "ws" { "ws" } else { "http" }]
+        );
+        for (upstream_transport, _, body) in stub.calls.lock().unwrap().iter() {
+            if upstream_transport == "http" {
+                assert_eq!(
+                    body["input"][0]["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .len(),
+                    input_bytes
+                );
+                assert_eq!(body["plugin_phases"], "body;send;");
+            }
+        }
+        assert!(calls
+            .lock()
+            .unwrap()
+            .contains(&GatewayPluginHookName::RequestBeforeSend));
+        assert!(terminal_log(&mut logs).await.error_code.is_none());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn plugin_hooks_run_once_per_request_attempt_and_output_across_fallback_and_failover() {
     for failover in [false, true] {
         let fixture = Fixture::new(true).await;

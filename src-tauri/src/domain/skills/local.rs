@@ -1,3 +1,4 @@
+use super::desktop::{reconcile, BuiltinSkills};
 use super::fs_ops::{
     copy_dir_recursive, is_managed_dir, is_managed_link_to_ssot, is_symlink,
     is_symlink_or_junction, read_source_metadata, remove_marker, skill_dir_content_hash,
@@ -5,7 +6,10 @@ use super::fs_ops::{
 };
 use super::installed::{get_skill_by_id, skill_key_exists};
 use super::npx_lock::NpxSkillLock;
-use super::paths::{cli_skills_root, ensure_skills_roots, ssot_skills_root, validate_cli_key};
+use super::paths::{
+    cli_skills_root, ensure_skills_roots, optional_cli_skills_root, ssot_skills_root,
+    validate_cli_key,
+};
 use super::repo_cache::ensure_repo_cache;
 use super::skill_md::parse_skill_md;
 use super::types::{
@@ -180,12 +184,15 @@ pub fn local_list<R: tauri::Runtime>(
         );
     }
 
-    let root = cli_skills_root(app, &cli_key)?;
+    let Some(root) = optional_cli_skills_root(app, &cli_key)? else {
+        return Ok(Vec::new());
+    };
     if !root.exists() {
         return Ok(Vec::new());
     }
     let ssot_root = ssot_skills_root(app)?;
     let npx_lock = NpxSkillLock::read(app);
+    let builtins = BuiltinSkills::load(&cli_key, &root)?;
 
     let entries = std::fs::read_dir(&root)
         .map_err(|e| format!("failed to read dir {}: {e}", root.display()))?;
@@ -201,6 +208,9 @@ pub fn local_list<R: tauri::Runtime>(
         let Some(summary) = summarize_local_skill_dir(&path, &ssot_root, Some(&npx_lock))? else {
             continue;
         };
+        if builtins.contains(&summary.dir_name) {
+            continue;
+        }
         out.push(summary);
     }
 
@@ -295,6 +305,7 @@ pub fn install_to_local<R: tauri::Runtime>(
         let _ = std::fs::remove_dir_all(&local_dir);
         return Err(err);
     }
+    reconcile(&cli_key, &cli_root)?;
 
     summarize_local_skill_dir(&local_dir, &ssot_root, None)?
         .ok_or_else(|| "SKILL_LOCAL_INSTALL_FAILED: local skill summary unavailable".into())
@@ -322,7 +333,7 @@ pub fn delete_local<R: tauri::Runtime>(
 
     let root = cli_skills_root(app, &cli_key)?;
     let local_dir = root.join(&dir_name);
-    if !local_dir.exists() {
+    if !local_dir.exists() || BuiltinSkills::load(&cli_key, &root)?.contains(&dir_name) {
         return Err(format!("SKILL_LOCAL_NOT_FOUND: {}", local_dir.display()).into());
     }
     if is_symlink(&local_dir)? {
@@ -353,7 +364,7 @@ pub fn delete_local<R: tauri::Runtime>(
 
     std::fs::remove_dir_all(&local_dir)
         .map_err(|e| format!("failed to remove {}: {e}", local_dir.display()))?;
-    Ok(())
+    reconcile(&cli_key, &root)
 }
 
 pub fn import_local<R: tauri::Runtime>(
@@ -379,7 +390,7 @@ pub fn import_local<R: tauri::Runtime>(
 
     let cli_root = cli_skills_root(app, &cli_key)?;
     let local_dir = cli_root.join(&dir_name);
-    if !local_dir.exists() {
+    if !local_dir.exists() || BuiltinSkills::load(&cli_key, &cli_root)?.contains(&dir_name) {
         return Err(format!("SKILL_LOCAL_NOT_FOUND: {}", local_dir.display()).into());
     }
     if !local_dir.is_dir() {
@@ -524,6 +535,7 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
         remove_marker(&local_dir);
         return Err(db_err!("failed to commit: {err}"));
     }
+    reconcile(&cli_key, &cli_root)?;
 
     get_skill_by_id(&conn, skill_id)
 }

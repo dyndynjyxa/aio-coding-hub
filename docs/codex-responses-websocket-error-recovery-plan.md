@@ -29,6 +29,8 @@ OpenAI Docs 的 [WebSocket Mode 错误示例](https://developers.openai.com/api/
 
 已核对 [Codex 0.161.0 的 WS 错误解析源码](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/codex-api/src/endpoint/responses_websocket.rs)：普通 error 缺失 status 时不能转换成 HTTP 语义错误；`previous_response_not_found` 在状态解析之前按可恢复错误处理。
 
+兼容补充：实测 Codex `0.144.4` 遇到带 `status=400` 的 `previous_response_not_found` 会直接结束任务，同一错误省略顶层 status 时能重发完整输入。WS 出站适配仅对输出前返回的 400 恢复响应省略顶层 status；已输出后的流内错误保留状态，避免把终止错误改成自动重发。内部 HTTP 响应和请求日志仍为 400，其他错误保持原状态字段，不按客户端版本分支。
+
 另外核对了 [Anthropic SDK 错误解析](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/_exceptions.py) 与 [Google GenAI SDK 错误解析](https://github.com/googleapis/python-genai/blob/main/google/genai/errors.py)：前者读取 `error.type`，后者读取 `error.message/status/code`，其中 Gemini 的 code 是数值 HTTP 状态。协议格式不能直接复用 OpenAI 的字符串 code。这些源码核对属于契约依据，不能替代实际 CLI 验收。审核时尚未实测 Claude/Gemini CLI；实施后的实际验证范围见第 8 节。
 
 ### 审核问题与处置
@@ -111,7 +113,7 @@ flowchart LR
 | 同一合法请求带原 nonce 重试或降级 | 复用已知失败的状态、错误码、消息及 trace | 不覆盖为归属不匹配，不领取预算，不再次执行已结束生成 |
 | WS 不支持、建连失败、未输出前的传输故障 | 使用现有同家 HTTP 降级 | 每个受控逻辑生成、每家最多一次 WS 建连机会；使用原业务尝试剩余期限 |
 | 上游真实认证、额度、模型等业务错误 | 单次尝试保留原状态/原因；直接返回保持原响应；切家耗尽则按现有网关 502 聚合 | 使用现有重试/切家/熔断规则；WS 保留代理链已经确定的结果，不重新决定最终状态 |
-| `previous_response_not_found` | 保留特定恢复信号及 400 状态 | 现有恢复归属验证与原预算继续生效 |
+| 输出前的 `previous_response_not_found` | 保留特定恢复信号；内部 HTTP 和日志为 400，WS 帧省略顶层 status 以兼容旧客户端 | 现有恢复归属验证与原预算继续生效；已确认必须走 HTTP 时刷新当前 session 的提示，重连返回 426，完整重发及后续轮次使用 HTTP |
 | 预热发生已确认的 WS 传输/能力故障 | 复用现有 session HTTP 提示；下一次 Upgrade 返回 426 | 后续正式请求使用完整 HTTP 输入；预热不执行生成，不向正式请求错误缓存写入无日志的 trace |
 | 预热遇到纯供应商不可用 | 按实际不可用返回 503，不设置 WS 不支持提示 | 不修改传输偏好；首个正式失败仍独立记录，供应商恢复后的新请求可以使用原传输 |
 | 已输出后的错误或断流 | 明确失败终态或流失败 | 网关结束当前生成，不自动换家或重放 |
@@ -166,7 +168,7 @@ HTTP `stream=true` 的准入失败发生在发送成功响应头之前，直接�
 1. 代理响应非 2xx 时，真实 HTTP 状态为权威来源；在消耗 body 前保存状态、trace 和必要恢复信息。优先使用附带的网关失败值；上游错误使用现有有界 body 解析。
 2. 接受现有 AIO `error_code/message`、OpenAI `error` 对象及 Responses error 格式；网关 5xx 使用 `server_error`，本地输入 4xx 使用 `invalid_request_error`，上游已有有效 `error.type` 保留。不能将 503 描述为输入错误。
 3. 保留代理链最终返回的错误码、消息和有效 `param` 等上下文；不把网关错误降格为通用 `upstream_error`，不把聚合后的 502 改回最后一家的 401/429。
-4. 本地调用方显式传入状态，避免隐式 400 或缺失状态。`previous_response_not_found` 仍是协议指定的 400 恢复信号；适配器不决定能否恢复。
+4. 本地调用方显式传入状态，避免隐式 400 或缺失状态。`previous_response_not_found` 内部仍为 400；仅在尚未输出内容的恢复响应转为 WS 帧时省略顶层 status，以免旧客户端将其当作终止性错误。流内错误始终保留状态。适配器不改变恢复资格、历史校验或预算。
 5. 上游流错误有有效语义状态时保留它；缺失时复用现有 `gate::error_status`。若两处都需要该纯协议函数，将它移入 `protocol.rs`，不复制业务分类。
 6. 非 JSON、读取失败或超限响应使用有界错误摘要及真实状态，沿用当前读取和超时限制。无法确定原因的流异常使用流失败语义，不伪装成输入错误。
 7. 传递必要恢复字段，如 `Retry-After/retry_after_seconds`。WS 流 error 转 `UpstreamResponse` 时也提取 Retry-After，供既有错误分类/额度处理使用；不将整个 HeaderMap 暴露给客户端，上游 `x-codex-turn-state` 继续剥离。
@@ -245,6 +247,8 @@ HTTP 恢复拒绝发生在活动请求登记之前，当前证据证明的是缺
 CLI 是首要体验入口：全部熔断后，各协议客户端能够解析可读原因；实际 Codex `error/turn.failed` 必须包含无可用供应商和熔断原因，Claude/Gemini/Grok 的最终错误展示使用各自版本验证。重试提示若包含原因，应保持同一业务来源。允许客户端按暂时错误重试；实测版本必须在其配置允许的有限次数内结束，最终不得只显示断流或归属不匹配。不能仅凭网关发出 503 就承诺任意版本客户端必然立即退出。
 
 AIO 复用 [requestActivityProjection.ts](../src/services/gateway/requestActivityProjection.ts)、既有日志列表和详情组件。正式失败从活动状态退出；实时、历史列表和详情都显示相同错误。详情区分入站 HTTP/WS、上游 HTTP/WS、同家降级与换家，以及 skipped/upstream_sent=false；101 不能显示成生成成功。
+
+请求完整重发的本地 400 由列表和详情共用的 `buildRequestLogAuditMeta` 显示“请求完整重发”，并提示恢复结果查看后续请求。保留真实状态、统计和供应商归属，不把恢复信号显示为已恢复成功。
 
 一致性指请求层状态与业务原因一致，详情仍显示各供应商的独立拒绝原因。插件有意修改客户端消息不覆盖网关业务日志，按现有 audit 保留解释。旧日志按旧错误码正常展示；新增的单绑定供应商熔断采用 503/`GW_ALL_PROVIDERS_UNAVAILABLE`，真正没有启用供应商继续使用原 `GW_NO_ENABLED_PROVIDER`。
 

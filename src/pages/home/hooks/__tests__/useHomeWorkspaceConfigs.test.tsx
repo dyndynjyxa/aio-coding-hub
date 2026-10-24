@@ -49,6 +49,7 @@ const queryState = vi.hoisted(() => ({
     codex: { data: null, isLoading: false } as QueryState<any>,
     gemini: { data: null, isLoading: false } as QueryState<any>,
     grok: { data: null, isLoading: false } as QueryState<any>,
+    claude_desktop: { data: null, isLoading: false } as QueryState<any>,
   },
   prompts: new Map<number | null, QueryState<any>>(),
   mcp: new Map<number | null, QueryState<any>>(),
@@ -65,6 +66,10 @@ function setQueryState(input?: {
   queryState.workspaces.codex = input?.workspaces?.codex ?? { data: null, isLoading: false };
   queryState.workspaces.gemini = input?.workspaces?.gemini ?? { data: null, isLoading: false };
   queryState.workspaces.grok = input?.workspaces?.grok ?? { data: null, isLoading: false };
+  queryState.workspaces.claude_desktop = input?.workspaces?.claude_desktop ?? {
+    data: null,
+    isLoading: false,
+  };
   queryState.prompts = new Map(input?.prompts ?? []);
   queryState.mcp = new Map(input?.mcp ?? []);
   queryState.skills = new Map(input?.skills ?? []);
@@ -265,6 +270,15 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
         loading: false,
         items: [],
       },
+      {
+        cliKey: "claude_desktop",
+        cliLabel: "Desktop",
+        workspaceId: null,
+        workspaceName: null,
+        workspaces: [],
+        loading: false,
+        items: [],
+      },
     ]);
   });
 
@@ -397,7 +411,7 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
 
     const { result } = renderHook(() => useHomeWorkspaceConfigs({ enabled: false }));
 
-    expect(result.current.map((item) => item.loading)).toEqual([false, false, false, false]);
+    expect(result.current.map((item) => item.loading)).toEqual([false, false, false, false, false]);
     expect(result.current[0]).toMatchObject({
       workspaceId: null,
       workspaceName: null,

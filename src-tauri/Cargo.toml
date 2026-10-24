@@ -1,6 +1,6 @@
 [package]
 name = "aio-coding-hub"
-version = "0.60.22"
+version = "0.60.23"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
@@ -48,7 +48,7 @@ futures-core = "0.3"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 flate2 = "1.1.5"
-zip = { version = "4.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
@@ -69,7 +69,8 @@ rodio = { version = "0.21.1", default-features = false, features = ["playback", 
 tempfile = "3"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
-tauri-plugin-updater = "2"
+# Releases use raw MSI/AppImage files; disable legacy ZIP support that pulls zip 4.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"

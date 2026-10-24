@@ -38,6 +38,19 @@ const LEGACY_CLI_CAPABILITIES: u32 = GROK_CAPABILITIES
     | CliCapability::ManagedUpdate as u32
     | CliCapability::ProviderPluginTarget as u32;
 
+// Desktop has its own 3P profile. Its Skills and global instructions live in
+// its 3P user data directory, not in Claude Code's `~/.claude`.
+const CLAUDE_DESKTOP_CAPABILITIES: u32 = CliCapability::Gateway as u32
+    | CliCapability::Provider as u32
+    | CliCapability::Logs as u32
+    | CliCapability::Usage as u32
+    | CliCapability::Pricing as u32
+    | CliCapability::CliProxy as u32
+    | CliCapability::Mcp as u32
+    | CliCapability::Skills as u32
+    | CliCapability::Prompts as u32
+    | CliCapability::Workspaces as u32;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CliSpec {
     pub(crate) key: CliKey,
@@ -50,10 +63,14 @@ impl CliSpec {
     }
 }
 
-pub(crate) const CLI_REGISTRY: [CliSpec; 4] = [
+pub(crate) const CLI_REGISTRY: [CliSpec; 5] = [
     CliSpec {
         key: CliKey::Claude,
         capabilities: LEGACY_CLI_CAPABILITIES,
+    },
+    CliSpec {
+        key: CliKey::ClaudeDesktop,
+        capabilities: CLAUDE_DESKTOP_CAPABILITIES,
     },
     CliSpec {
         key: CliKey::Codex,
@@ -74,6 +91,7 @@ pub(crate) const SUPPORTED_CLI_KEYS: [&str; CLI_REGISTRY.len()] = [
     CLI_REGISTRY[1].key.as_str(),
     CLI_REGISTRY[2].key.as_str(),
     CLI_REGISTRY[3].key.as_str(),
+    CLI_REGISTRY[4].key.as_str(),
 ];
 
 pub(crate) fn cli_keys_with(capability: CliCapability) -> impl Iterator<Item = &'static str> {
@@ -113,6 +131,7 @@ pub(crate) enum CliKey {
     Codex,
     Gemini,
     Grok,
+    ClaudeDesktop,
 }
 
 #[allow(dead_code)]
@@ -124,6 +143,7 @@ impl CliKey {
             "codex" => Ok(Self::Codex),
             "gemini" => Ok(Self::Gemini),
             "grok" => Ok(Self::Grok),
+            "claude_desktop" => Ok(Self::ClaudeDesktop),
             _ => Err(AppError::new(
                 "SEC_INVALID_INPUT",
                 format!("unknown cli_key={s}"),
@@ -138,6 +158,7 @@ impl CliKey {
             Self::Codex => "codex",
             Self::Gemini => "gemini",
             Self::Grok => "grok",
+            Self::ClaudeDesktop => "claude_desktop",
         }
     }
 
@@ -240,6 +261,10 @@ mod tests {
         assert_eq!(CliKey::parse("codex").unwrap(), CliKey::Codex);
         assert_eq!(CliKey::parse("gemini").unwrap(), CliKey::Gemini);
         assert_eq!(CliKey::parse("grok").unwrap(), CliKey::Grok);
+        assert_eq!(
+            CliKey::parse("claude_desktop").unwrap(),
+            CliKey::ClaudeDesktop
+        );
     }
 
     #[test]
@@ -282,13 +307,33 @@ mod tests {
             .filter(|capability| CliKey::Grok.supports(*capability))
             .collect::<Vec<_>>();
         assert_eq!(actual_grok, EVERY_CAPABILITY[..11]);
+
+        let desktop = EVERY_CAPABILITY
+            .into_iter()
+            .filter(|capability| CliKey::ClaudeDesktop.supports(*capability))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            desktop,
+            vec![
+                CliCapability::Gateway,
+                CliCapability::Provider,
+                CliCapability::Logs,
+                CliCapability::Usage,
+                CliCapability::Pricing,
+                CliCapability::CliProxy,
+                CliCapability::Mcp,
+                CliCapability::Skills,
+                CliCapability::Prompts,
+                CliCapability::Workspaces,
+            ]
+        );
     }
 
     #[test]
     fn capability_keys_are_derived_from_registry() {
         assert_eq!(
             cli_keys_with(CliCapability::Mcp).collect::<Vec<_>>(),
-            vec!["claude", "codex", "gemini", "grok"]
+            vec!["claude", "claude_desktop", "codex", "gemini", "grok"]
         );
         assert_eq!(
             cli_keys_with(CliCapability::Wsl).collect::<Vec<_>>(),

@@ -553,6 +553,57 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.getByText(/Provider 内部错误/)).toBeInTheDocument();
   });
 
+  it("explains an empty-attempt context recovery without claiming a successful resend", () => {
+    setRequestLogQueryState({
+      selectedLog: createRequestLogDetail({
+        cli_key: "codex",
+        path: "/v1/responses",
+        status: 400,
+        error_code: "GW_REQUEST_REJECTED",
+        final_provider_id: 0,
+        final_provider_name: "Unknown",
+        attempts_json: "[]",
+        error_details_json: JSON.stringify({
+          error_category: "context",
+          reason_code: "previous_response_not_found",
+          reason: "Response context is unavailable; resend the full input",
+        }),
+        special_settings_json: JSON.stringify([
+          {
+            type: "codex_responses_transport",
+            scope: "attempt",
+            client_transport: "responses_ws",
+            upstream_transport: "responses_ws",
+            transport_action: "full_input_retry",
+            providerId: 7,
+            failure_class: "context",
+            reason_code: "previous_response_not_found",
+          },
+        ]),
+      }),
+    });
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+    expect(screen.getByText("请求完整重发")).toBeInTheDocument();
+    expect(screen.getByText("请求完整重发 (GW_REQUEST_REJECTED)")).toHaveClass("bg-secondary");
+    expect(
+      screen.getByText("支持自动恢复的客户端会重发完整输入；恢复结果请查看后续请求。")
+    ).toBeInTheDocument();
+    expect(screen.getByText("400 请求完整重发")).toHaveClass("text-muted-foreground");
+    expect(screen.queryByText("请求拒绝 (GW_REQUEST_REJECTED)")).not.toBeInTheDocument();
+    expect(screen.queryByText("请求或上下文恢复校验未通过")).not.toBeInTheDocument();
+    expect(screen.queryByText(/必要时开始新的轮次/)).not.toBeInTheDocument();
+    expect(screen.queryByText("400 失败")).not.toBeInTheDocument();
+    expect(screen.queryByText(/恢复成功/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "详细信息" }));
+    expect(
+      screen.getByText("Response context is unavailable; resend the full input")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("上游状态码:")).not.toBeInTheDocument();
+    switchToTab("决策链");
+    expect(screen.getByText("供应商：#7")).toBeInTheDocument();
+    expect(screen.getByText("无故障切换尝试。")).toBeInTheDocument();
+  });
+
   it("shows local nonce rejection as a completed failure without provider retries", () => {
     const reason = "unknown or expired Responses owner nonce";
     setRequestLogQueryState({

@@ -17,7 +17,7 @@ pub(in crate::gateway) enum SendOutcome {
     Response(UpstreamResponse),
     Rejected(UpstreamResponse),
     Transport(&'static str),
-    ContextLost,
+    ContextLost { require_http: bool },
     Local(&'static str),
     Http(&'static str),
 }
@@ -117,7 +117,14 @@ pub(in crate::gateway) async fn send(
             warm.provider_id == provider_id && Some(warm.response_id.as_str()) == previous
         });
         if !valid || !allow_ws || reusable.is_none() {
-            return SendOutcome::ContextLost;
+            return SendOutcome::ContextLost {
+                require_http: !allow_ws
+                    || continuation.as_ref().is_some_and(|current| {
+                        current.provider_id == provider_id
+                            && !current.upstream_ws
+                            && Some(current.response_id.as_str()) == previous
+                    }),
+            };
         }
     }
     if !allow_ws {
@@ -197,9 +204,6 @@ pub(in crate::gateway) async fn send(
         }
     }
     let serialized = payload.to_string();
-    if serialized.len() > protocol::MAX_MESSAGE_BYTES {
-        return SendOutcome::Local("Responses request exceeds WebSocket byte limit");
-    }
     let send_cap = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let send_deadline = deadline
         .map(tokio::time::Instant::from_std)

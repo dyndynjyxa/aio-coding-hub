@@ -20,6 +20,7 @@ impl CliAuthRegistry {
 
         let claude = ClaudeAuthStrategy;
         by_cli_key.insert(claude.cli_key_str(), Box::new(claude));
+        by_cli_key.insert("claude_desktop", Box::new(ClaudeAuthStrategy));
 
         let codex = CodexAuthStrategy;
         by_cli_key.insert(codex.cli_key_str(), Box::new(codex));

@@ -160,6 +160,48 @@ describe("components/home/RealtimeTraceCards", () => {
     expect(screen.queryByText("200 成功")).not.toBeInTheDocument();
   });
 
+  it.each(["context", "local", null])(
+    "distinguishes a realtime full-input retry from an ordinary rejection (%s)",
+    (errorCategory) => {
+      const baseTime = 1_700_000_000_000;
+      render(
+        <RealtimeTraceCards
+          folderLookupBySessionKey={new Map()}
+          cards={cards([
+            traceBase({
+              cli_key: "codex",
+              path: "/v1/responses",
+              summary: {
+                status: 400,
+                error_code: "GW_REQUEST_REJECTED",
+                error_category: errorCategory,
+                duration_ms: 100,
+              },
+            }),
+          ])}
+          nowMs={baseTime}
+          formatUnixSeconds={(ts) => String(ts)}
+          showCustomTooltip={false}
+        />
+      );
+
+      if (errorCategory === "context") {
+        const badge = screen.getByText("400 请求完整重发").parentElement;
+        expect(badge).toHaveClass("text-muted-foreground");
+        expect(badge).toHaveAttribute("title", expect.stringContaining("恢复结果请查看后续请求"));
+        expect(badge?.querySelector("svg.lucide-refresh-cw")).toBeInTheDocument();
+        expect(badge?.querySelector("svg.lucide-check-circle-2")).not.toBeInTheDocument();
+        expect(screen.queryByText("请求拒绝")).not.toBeInTheDocument();
+        expect(screen.queryByText("400 失败")).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText("请求拒绝")).toBeInTheDocument();
+        expect(screen.getByText("400 失败")).toBeInTheDocument();
+        expect(screen.queryByText("400 请求完整重发")).not.toBeInTheDocument();
+      }
+      expect(screen.queryByText(/成功/)).not.toBeInTheDocument();
+    }
+  );
+
   it("shows canonical cache buckets, preserves zero, and does not synthesize abort cache writes", () => {
     const baseTime = 1_700_000_000_000;
     const renderCards = (summary: Record<string, unknown>) => (

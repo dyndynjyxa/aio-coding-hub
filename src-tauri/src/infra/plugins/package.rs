@@ -150,7 +150,13 @@ fn extract_zip_bytes(
                 format!("failed to read plugin package entry: {error}"),
             )
         })?;
-        let relative_path = safe_zip_entry_path(file.name())?;
+        let name = file.name().map_err(|error| {
+            AppError::new(
+                "PLUGIN_PACKAGE_INVALID_ARCHIVE",
+                format!("failed to read plugin package entry name: {error}"),
+            )
+        })?;
+        let relative_path = safe_zip_entry_path(&name)?;
         if relative_path.as_os_str().is_empty() {
             continue;
         }

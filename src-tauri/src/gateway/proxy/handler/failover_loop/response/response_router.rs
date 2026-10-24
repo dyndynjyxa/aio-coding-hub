@@ -87,10 +87,7 @@ where
                         .and_then(serde_json::Value::as_str)
                         == Some("previous_response_not_found");
                     if context_lost {
-                        return ws_attempt::recover(
-                            ctx, input, prepared, indices, timing, loop_state,
-                        )
-                        .await;
+                        return ws_attempt::recover(ctx, input, prepared, false, loop_state).await;
                     }
                     response_fixer::push_special_setting(
                         &input.special_settings,
@@ -388,7 +385,7 @@ fn should_try_claude_auth_fallback<R: tauri::Runtime>(
     retry_index: u32,
     status: reqwest::StatusCode,
 ) -> bool {
-    input.cli_key == "claude"
+    matches!(input.cli_key.as_str(), "claude" | "claude_desktop")
         && prepared.oauth_adapter.is_none()
         && !prepared.cx2cc_active
         && !retry_state.claude_api_key_bearer_fallback

@@ -128,8 +128,8 @@ where
             ws_attempt::transport_failure(ctx, input, prepared, indices, timing, reason, loop_state)
                 .await
         }
-        AttemptSendOutcome::ContextLost(timing) => {
-            ws_attempt::recover(ctx, input, prepared, indices, timing, loop_state).await
+        AttemptSendOutcome::ContextLost { require_http } => {
+            ws_attempt::recover(ctx, input, prepared, require_http, loop_state).await
         }
         AttemptSendOutcome::LocalProtocol(reason, _timing) => {
             if reason == "prewarm_http_required" {

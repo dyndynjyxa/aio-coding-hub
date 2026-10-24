@@ -1,7 +1,7 @@
 {
   "name": "aio-coding-hub",
   "private": true,
-  "version": "0.60.22",
+  "version": "0.60.23",
   "packageManager": "pnpm@12.9.1",
   "type": "module",
   "scripts": {
@@ -87,7 +87,7 @@
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
-    "zod": "^4.1.12"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",

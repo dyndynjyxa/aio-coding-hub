@@ -136,6 +136,7 @@ export function useHomeOAuthQuota({
   const oauthProviders = useMemo(() => {
     const providersByCli: Record<CliKey, OAuthProviderSummary[]> = {
       claude: readOAuthProviders(claudeProvidersQuery.data),
+      claude_desktop: [],
       codex: readOAuthProviders(codexProvidersQuery.data),
       gemini: readOAuthProviders(geminiProvidersQuery.data),
       grok: [],

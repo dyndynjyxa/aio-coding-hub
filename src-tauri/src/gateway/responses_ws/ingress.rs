@@ -79,13 +79,8 @@ where
     let headers = parts.headers;
     let uri = parts.uri;
     upgrade
-        .max_write_buffer_size(2 * protocol::MAX_MESSAGE_BYTES)
-        .max_message_size(
-            protocol::MAX_MESSAGE_BYTES.min(crate::gateway::util::max_request_body_bytes()),
-        )
-        .max_frame_size(
-            protocol::MAX_MESSAGE_BYTES.min(crate::gateway::util::max_request_body_bytes()),
-        )
+        .max_message_size(crate::gateway::util::max_request_body_bytes())
+        .max_frame_size(crate::gateway::util::max_request_body_bytes())
         .on_upgrade(move |socket| serve(socket, state, path, headers, uri, connection))
         .into_response()
 }
@@ -117,11 +112,15 @@ async fn serve<R>(
         if !state.responses_ws.enabled() || connection.epoch != state.responses_ws.epoch() {
             break;
         }
+        let idle_timeout_secs = crate::settings::read(&state.app)
+            .map(|settings| settings.upstream_stream_idle_timeout_seconds)
+            .unwrap_or(crate::settings::DEFAULT_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS);
         let message = tokio::select! {
             _ = stop.changed() => break,
             _ = changed.changed() => break,
-            message = tokio::time::timeout(state::IDLE_TIMEOUT, socket.next()) => match message {
-                Ok(Some(Ok(message))) => message, _ => break,
+            _ = tokio::time::sleep(Duration::from_secs(idle_timeout_secs.into())), if idle_timeout_secs > 0 => break,
+            message = socket.next() => match message {
+                Some(Ok(message)) => message, _ => break,
             },
         };
         let text = match message {

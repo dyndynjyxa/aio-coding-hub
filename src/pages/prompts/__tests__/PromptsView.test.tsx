@@ -25,7 +25,10 @@ vi.mock("../../../query/prompts", async () => {
 });
 
 describe("pages/prompts/PromptsView", () => {
-  it("shows the Grok prompt target path", () => {
+  it.each([
+    ["grok", "~/.grok/AGENTS.md"],
+    ["claude_desktop", "Claude-3p/local-agent-mode-sessions/…/memory/CLAUDE.md"],
+  ] as const)("shows the %s prompt target path", (cliKey, path) => {
     vi.mocked(usePromptsListQuery).mockReturnValue({
       data: [],
       isFetching: false,
@@ -44,9 +47,9 @@ describe("pages/prompts/PromptsView", () => {
       mutateAsync: vi.fn(),
     } as any);
 
-    render(<PromptsView workspaceId={1} cliKey="grok" isActiveWorkspace />);
+    render(<PromptsView workspaceId={1} cliKey={cliKey} isActiveWorkspace />);
 
-    expect(screen.getByText("启用后会写入 ~/.grok/AGENTS.md")).toBeInTheDocument();
+    expect(screen.getByText(`启用后会写入 ${path}`)).toBeInTheDocument();
   });
 
   it("creates, toggles, edits and deletes prompts", async () => {

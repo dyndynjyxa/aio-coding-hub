@@ -21,7 +21,7 @@ import {
   formatUsd,
   sanitizeTtfbMs,
 } from "../../utils/formatters";
-import { Clock, Server, CheckCircle2, CircleMinus, XCircle } from "lucide-react";
+import { Clock, Server, CheckCircle2, CircleMinus, XCircle, RefreshCw } from "lucide-react";
 import { computeStatusBadge, resolveCacheCreationDisplay } from "./requestLogPresentation";
 import { FolderBadge, FreeBadge, ReasoningEffortBadge, SessionReuseBadge } from "./LogBadges";
 import { formatModelRedirectText } from "./requestLogSpecialSettings";
@@ -146,6 +146,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         const hasFailover = hasFailoverFromSegments(attemptRoute.segments);
 
         const statusBadge = computeStatusBadge({
+          cliKey: trace.cli_key,
+          errorCategory: summary?.error_category,
           status: summaryStatus,
           errorCode: summaryErrorCode,
           inProgress: isInProgress,
@@ -311,6 +313,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                           />
                         </svg>
                       </div>
+                    ) : statusBadge.isFullInputRetry ? (
+                      <RefreshCw className="h-3 w-3 shrink-0" aria-hidden="true" />
                     ) : statusBadge.isError ? (
                       <XCircle className="h-3 w-3 shrink-0" />
                     ) : statusBadge.isIncomplete ? (
@@ -344,7 +348,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   {isFree && <FreeBadge />}
 
-                  {summaryErrorCode && (
+                  {summaryErrorCode && !statusBadge.isFullInputRetry && (
                     <span className="shrink-0 rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20 shadow-pill-subtle border border-amber-500/10 dark:border-amber-400/10">
                       {getErrorCodeLabel(summaryErrorCode)}
                     </span>

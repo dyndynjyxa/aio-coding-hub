@@ -148,6 +148,62 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getByText("200 不完整结束")).toBeInTheDocument();
   });
 
+  it("explains an empty-attempt context recovery in both list modes", () => {
+    localStorage.setItem("home_request_logs_compact", "false");
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              cli_key: "codex",
+              path: "/v1/responses",
+              status: 400,
+              error_code: "GW_REQUEST_REJECTED",
+              final_provider_id: 0,
+              final_provider_name: "Unknown",
+              attempt_count: 0,
+              route: [],
+              special_settings_json: JSON.stringify([
+                {
+                  type: "codex_responses_transport",
+                  transport_action: "full_input_retry",
+                  providerId: 7,
+                  failure_class: "context",
+                  reason_code: "previous_response_not_found",
+                },
+              ]),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("请求完整重发")).toBeInTheDocument();
+    expect(screen.getByText(/恢复结果请查看后续请求/)).toBeInTheDocument();
+    const status = screen.getByText("400 请求完整重发").parentElement;
+    expect(status).toHaveClass("text-muted-foreground");
+    expect(status?.querySelector("svg.lucide-refresh-cw")).toBeInTheDocument();
+    expect(status?.querySelector("svg.lucide-check-circle-2")).not.toBeInTheDocument();
+    expect(screen.queryByText("请求拒绝")).not.toBeInTheDocument();
+    expect(screen.queryByText("400 失败")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+    expect(screen.getByText("请求完整重发")).toBeInTheDocument();
+    expect(screen.getByText("请求完整重发")).toHaveAttribute(
+      "title",
+      expect.stringContaining("恢复结果请查看后续请求")
+    );
+    expect(screen.getByText("400 请求完整重发")).toBeInTheDocument();
+    expect(screen.queryByText("请求拒绝")).not.toBeInTheDocument();
+    expect(screen.queryByText("400 失败")).not.toBeInTheDocument();
+    expect(screen.queryByText(/恢复成功/)).not.toBeInTheDocument();
+  });
+
   it("renders traces + logs and supports refresh/select", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [

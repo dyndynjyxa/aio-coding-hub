@@ -91,7 +91,7 @@ pub(super) async fn transport_failure<R: tauri::Runtime>(
         generation.previous.is_some()
     };
     if previous {
-        recover(ctx, input, prepared, indices, timing, loop_state).await
+        recover(ctx, input, prepared, true, loop_state).await
     } else {
         LoopControl::RetryTransport
     }
@@ -101,8 +101,7 @@ pub(super) async fn recover<R: tauri::Runtime>(
     ctx: CommonCtx<'_, R>,
     input: &RequestContext<R>,
     prepared: &PreparedProvider,
-    _indices: AttemptIndices,
-    _timing: AttemptTiming,
+    require_http: bool,
     loop_state: &mut LoopState<'_, R>,
 ) -> LoopControl {
     let Some(request) = &input.ws_request else {
@@ -126,6 +125,16 @@ pub(super) async fn recover<R: tauri::Runtime>(
     // Without a grant the client's full resend still runs as a fresh generation.
     let suspended = request.connection.runtime.suspend(request).is_ok();
     if suspended || incremental {
+        if require_http && request.client_ws {
+            if let Some(session) = input
+                .base_headers
+                .get("session-id")
+                .and_then(|value| value.to_str().ok())
+            {
+                // Keep the client's transport aligned with the upstream HTTP fallback.
+                request.connection.runtime.force_http(session);
+            }
+        }
         marker(
             input,
             prepared.provider_id,

@@ -1,4 +1,4 @@
-import { AlertTriangle, Lightbulb } from "lucide-react";
+import { AlertTriangle, Lightbulb, RefreshCw } from "lucide-react";
 import { Card } from "../../ui/Card";
 import {
   GatewayErrorDescriptions,
@@ -7,6 +7,8 @@ import {
 import type { RequestLogErrorObservation } from "./requestLogErrorDetails";
 import { DisclosureSection } from "./DisclosureSection";
 import { formatCircuitRecovery } from "../../utils/formatters";
+import { cn } from "../../utils/cn";
+import { FULL_INPUT_RETRY_PRESENTATION } from "./requestLogPresentation";
 
 export type RequestLogErrorObservationCardProps = {
   observation: RequestLogErrorObservation | null;
@@ -17,9 +19,12 @@ export function RequestLogErrorObservationCard({
 }: RequestLogErrorObservationCardProps) {
   if (!observation) return null;
 
-  const shortLabel = observation.displayErrorCode
-    ? getGatewayErrorShortLabel(observation.displayErrorCode)
-    : null;
+  const shortLabel = observation.isFullInputRetry
+    ? FULL_INPUT_RETRY_PRESENTATION.label
+    : observation.displayErrorCode
+      ? getGatewayErrorShortLabel(observation.displayErrorCode)
+      : null;
+  const StatusIcon = observation.isFullInputRetry ? RefreshCw : AlertTriangle;
   const desc = observation.gwDescription?.desc ?? null;
   const suggestion = observation.gwDescription?.suggestion ?? null;
   const fallbackTitle = resolveFallbackTitle(observation);
@@ -46,11 +51,26 @@ export function RequestLogErrorObservationCard({
       <div className="space-y-2.5">
         {/* Header: error code badge + description */}
         <div className="flex flex-wrap items-start gap-2">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500 dark:text-rose-400" />
+          <StatusIcon
+            className={cn(
+              "mt-0.5 h-4 w-4 shrink-0",
+              observation.isFullInputRetry
+                ? "text-muted-foreground"
+                : "text-rose-500 dark:text-rose-400"
+            )}
+            aria-hidden="true"
+          />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               {observation.displayErrorCode ? (
-                <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-xs font-semibold",
+                    observation.isFullInputRetry
+                      ? "bg-secondary text-muted-foreground"
+                      : "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                  )}
+                >
                   {shortLabel !== observation.displayErrorCode
                     ? `${shortLabel} (${observation.displayErrorCode})`
                     : observation.displayErrorCode}
@@ -71,9 +91,22 @@ export function RequestLogErrorObservationCard({
 
         {/* Suggestion */}
         {suggestion ? (
-          <div className="flex items-start gap-2 rounded-lg bg-amber-50/60 px-3 py-2 dark:bg-amber-900/15">
-            <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="text-xs text-amber-800 dark:text-amber-300">{suggestion}</p>
+          <div
+            className={cn(
+              "flex items-start gap-2 rounded-lg px-3 py-2",
+              observation.isFullInputRetry
+                ? "bg-secondary text-muted-foreground"
+                : "bg-amber-50/60 text-amber-800 dark:bg-amber-900/15 dark:text-amber-300"
+            )}
+          >
+            <Lightbulb
+              className={cn(
+                "mt-0.5 h-3.5 w-3.5 shrink-0",
+                !observation.isFullInputRetry && "text-amber-600 dark:text-amber-400"
+              )}
+              aria-hidden="true"
+            />
+            <p className="text-xs">{suggestion}</p>
           </div>
         ) : null}
 

@@ -15,6 +15,7 @@ export type CliProxyStatus = Override<
   {
     cli_key: CliKey;
     current_gateway_origin?: string | null;
+    desktop?: GeneratedCliProxyStatus["desktop"];
   }
 >;
 

@@ -619,7 +619,16 @@ pub fn parse_workspace_cli_target_json<R: tauri::Runtime>(
             servers: parse_toml_mcp_servers(&cli_key, &text)
                 .map_err(crate::shared::error::AppError::from)?,
         },
-        CliKey::Claude | CliKey::Gemini => parse_json(&text)?,
+        // Claude Desktop only writes `mcpServers` once a server has been configured.
+        CliKey::ClaudeDesktop
+            if serde_json::from_str::<serde_json::Value>(&text)
+                .is_ok_and(|root| root.is_object() && root.get("mcpServers").is_none()) =>
+        {
+            McpParseResult {
+                servers: Vec::new(),
+            }
+        }
+        CliKey::Claude | CliKey::ClaudeDesktop | CliKey::Gemini => parse_json(&text)?,
     };
 
     if parsed.servers.is_empty() {
@@ -804,13 +813,21 @@ mod tests {
     use super::*;
     use std::ffi::OsString;
 
-    struct GrokHomeRestore(Option<OsString>);
+    struct EnvVarRestore(&'static str, Option<OsString>);
 
-    impl Drop for GrokHomeRestore {
+    impl EnvVarRestore {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let restore = Self(key, std::env::var_os(key));
+            std::env::set_var(key, value);
+            restore
+        }
+    }
+
+    impl Drop for EnvVarRestore {
         fn drop(&mut self) {
-            match self.0.take() {
-                Some(value) => std::env::set_var("GROK_HOME", value),
-                None => std::env::remove_var("GROK_HOME"),
+            match self.1.take() {
+                Some(value) => std::env::set_var(self.0, value),
+                None => std::env::remove_var(self.0),
             }
         }
     }
@@ -891,8 +908,7 @@ mod tests {
     fn parse_workspace_cli_target_imports_grok_toml() {
         let _env_lock = crate::test_support::test_env_lock();
         let grok_home = tempfile::tempdir().expect("Grok home tempdir");
-        let _restore = GrokHomeRestore(std::env::var_os("GROK_HOME"));
-        std::env::set_var("GROK_HOME", grok_home.path());
+        let _restore = EnvVarRestore::set("GROK_HOME", grok_home.path());
 
         std::fs::write(
             grok_home.path().join("config.toml"),
@@ -925,6 +941,34 @@ enabled = false
             Some("test")
         );
         assert!(!parsed.servers[0].enabled);
+    }
+
+    #[test]
+    fn parse_workspace_cli_target_reports_empty_desktop_config() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home tempdir");
+        let _home = EnvVarRestore::set("AIO_CODING_HUB_HOME_DIR", home.path());
+        let _desktop = EnvVarRestore::set("CLAUDE_USER_DATA_DIR", home.path().join("desktop-3p"));
+        let app = tauri::test::mock_app();
+
+        let path = crate::infra::cli_proxy::claude_desktop_mcp_config_path(app.handle())
+            .expect("Desktop config path");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create Desktop dir");
+        std::fs::write(&path, br#"{"deploymentMode":"3p","preferences":{}}"#)
+            .expect("write Desktop config");
+
+        let db_dir = tempfile::tempdir().expect("db tempdir");
+        let db =
+            db::init_for_tests(&db_dir.path().join("mcp-import.sqlite")).expect("init test db");
+        let workspace = workspaces::create(&db, "claude_desktop", "Import target", false)
+            .expect("create workspace");
+
+        let err = parse_workspace_cli_target_json(app.handle(), &db, workspace.id)
+            .expect_err("Desktop config without mcpServers has nothing to import");
+
+        assert!(err
+            .to_string()
+            .contains("no importable mcp servers in claude_desktop config"));
     }
 
     #[test]
