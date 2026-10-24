@@ -25,7 +25,9 @@ import type {
   SaveActionContext,
 } from "./providerEditorActionContext";
 import {
+  clearProviderOAuthLimitsCache,
   fetchProviderOAuthStatus,
+  refreshProviderOAuthLimits,
   writeProviderOAuthStatusCache,
   useProviderDeleteMutation,
   useProviderOAuthStatusQuery,
@@ -871,6 +873,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       setOauthStatus,
       refreshOauthStatus,
       writeOauthStatusCache,
+      clearOauthLimitsCache: (providerId) => clearProviderOAuthLimitsCache(queryClient, providerId),
+      refreshOauthLimits: (providerId) => refreshProviderOAuthLimits(queryClient, providerId),
       setOauthLoading,
       oauthDeviceFlow,
       setOauthDeviceFlow,
@@ -901,6 +905,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       oauthDeviceError,
       refreshOauthStatus,
       writeOauthStatusCache,
+      queryClient,
       providerUpsertMutation,
       providerDeleteMutation,
       beginOAuthLoginAttempt,

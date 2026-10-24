@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { logToConsole } from "../../../services/consoleLog";
 import { openDesktopUrl } from "../../../services/desktop/opener";
+import {
+  clearProviderOAuthLimitsCache,
+  refreshProviderOAuthLimits,
+} from "../../../query/providers";
+import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import {
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
@@ -123,6 +129,7 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
 }
 
 function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
+  const client = createTestQueryClient();
   let attempt = 0;
   let currentAttempt = 0;
   const values = {
@@ -173,6 +180,8 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     setOauthStatus: vi.fn(),
     refreshOauthStatus: vi.fn().mockResolvedValue(makeStatus()),
     writeOauthStatusCache: vi.fn(),
+    clearOauthLimitsCache: vi.fn((providerId) => clearProviderOAuthLimitsCache(client, providerId)),
+    refreshOauthLimits: vi.fn((providerId) => refreshProviderOAuthLimits(client, providerId)),
     setOauthLoading: vi.fn(),
     oauthDeviceFlow: null,
     setOauthDeviceFlow: vi.fn(),
@@ -297,6 +306,7 @@ describe("providerEditorOAuthActions", () => {
     await handleOAuthLogin(ctx);
 
     expect(ctx.removeProvider).toHaveBeenCalledWith(9);
+    expect(ctx.clearOauthLimitsCache).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith("OAuth 登录失败");
 
     const stale = makeCtx({
@@ -445,6 +455,7 @@ describe("providerEditorOAuthActions", () => {
     expect(expired.ctx.cancelOAuthDeviceFlow).toHaveBeenCalledWith("flow-expired");
     expect(expired.ctx.setOauthDeviceError).toHaveBeenCalledWith("设备码已过期，请重新开始登录。");
     expect(expired.ctx.removeProvider).toHaveBeenCalledWith(9);
+    expect(expired.ctx.clearOauthLimitsCache).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith("设备码登录失败：设备码已过期");
   });
 
@@ -459,8 +470,40 @@ describe("providerEditorOAuthActions", () => {
 
     expect(stale.ctx.cancelOAuthDeviceFlow).toHaveBeenCalledWith("flow-stale");
     expect(stale.ctx.removeProvider).toHaveBeenCalledWith(9);
+    expect(stale.ctx.clearOauthLimitsCache).not.toHaveBeenCalled();
     expect(openDesktopUrl).not.toHaveBeenCalled();
     expect(stale.ctx.setOauthLoading).not.toHaveBeenLastCalledWith(false);
+  });
+
+  it("does not report stale device login success when a newer login cancels its usage refresh", async () => {
+    vi.mocked(openDesktopUrl).mockResolvedValue(true);
+    vi.mocked(providerOAuthStartDeviceFlow).mockResolvedValue(makeDeviceStart());
+    vi.mocked(providerOAuthPollDeviceFlow).mockResolvedValue(makeDevicePoll());
+    let resolveOldLimits!: (value: null) => void;
+    vi.mocked(providerOAuthFetchLimits)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOldLimits = resolve;
+          })
+      )
+      .mockResolvedValue(null);
+    const { ctx } = makeCtx({ mode: "edit", editingProviderId: 9 });
+    const oldLogin = handleOAuthDeviceLogin(ctx);
+    await waitFor(() => expect(providerOAuthFetchLimits).toHaveBeenCalledTimes(1));
+
+    await handleOAuthDeviceLogin(ctx);
+    resolveOldLimits(null);
+    await oldLogin;
+
+    expect(providerOAuthFetchLimits).toHaveBeenCalledTimes(2);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("设备码登录成功");
+    expect(logToConsole).not.toHaveBeenCalledWith(
+      "warn",
+      expect.stringContaining("设备码登录后获取用量异常"),
+      expect.anything()
+    );
   });
 
   it("handles device OAuth cleanup failures, polling retries, and runtime errors", async () => {
@@ -545,6 +588,8 @@ describe("providerEditorOAuthActions", () => {
     expect(ctx.setOauthStatus).toHaveBeenCalledWith(null);
     expect(ctx.writeOauthStatusCache).toHaveBeenCalledWith(null, 7);
     expect(ctx.writeOauthStatusCache).toHaveBeenCalledTimes(1);
+    expect(ctx.clearOauthLimitsCache).toHaveBeenCalledWith(7);
+    expect(ctx.clearOauthLimitsCache).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith("Token 刷新成功");
     expect(toast).toHaveBeenCalledWith("Token 刷新失败");
     expect(toast).toHaveBeenCalledWith("Token 刷新失败：Error: refresh down");

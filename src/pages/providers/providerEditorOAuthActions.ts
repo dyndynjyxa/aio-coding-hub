@@ -7,7 +7,7 @@ import {
   providerOAuthStartFlow,
   providerOAuthRefresh,
   providerOAuthDisconnect,
-  providerOAuthFetchLimits,
+  type OAuthLimitsResult,
 } from "../../services/providers/providers";
 import type { OAuthActionContext } from "./providerEditorActionContext";
 import { presentProviderEditorPayloadBuildError } from "./providerEditorFeedback";
@@ -137,6 +137,7 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
     );
     if (result.success) {
       shouldRollbackAutoSavedProvider = false;
+      await whenOAuthAttemptCurrent(ctx.clearOauthLimitsCache(targetProviderId), isCurrentAttempt);
 
       let status: Awaited<ReturnType<OAuthActionContext["refreshOauthStatus"]>> = null;
       try {
@@ -177,10 +178,10 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
         );
       }
 
-      let limits: Awaited<ReturnType<typeof providerOAuthFetchLimits>> = null;
+      let limits: OAuthLimitsResult | null = null;
       try {
         limits = await whenOAuthAttemptCurrent(
-          providerOAuthFetchLimits(targetProviderId),
+          ctx.refreshOauthLimits(targetProviderId),
           isCurrentAttempt
         );
         if (!limits) {
@@ -361,6 +362,10 @@ export async function handleOAuthDeviceLogin(ctx: OAuthActionContext) {
       );
       if (result.completed) {
         shouldRollbackAutoSavedProvider = false;
+        await whenOAuthAttemptCurrent(
+          ctx.clearOauthLimitsCache(targetProviderId),
+          isCurrentAttempt
+        );
         ctx.clearActiveOAuthDeviceFlow(start.flow_id);
         ctx.setOauthDevicePolling(false);
         ctx.setOauthDeviceFlow(null);
@@ -373,10 +378,7 @@ export async function handleOAuthDeviceLogin(ctx: OAuthActionContext) {
         ctx.setOauthStatus(status);
 
         try {
-          await whenOAuthAttemptCurrent(
-            providerOAuthFetchLimits(targetProviderId),
-            isCurrentAttempt
-          );
+          await whenOAuthAttemptCurrent(ctx.refreshOauthLimits(targetProviderId), isCurrentAttempt);
         } catch (err) {
           if (isOAuthAttemptStaleError(err)) {
             throw err;
@@ -483,6 +485,7 @@ export async function handleOAuthDisconnect(ctx: OAuthActionContext) {
   try {
     const result = await providerOAuthDisconnect(ctx.editingProviderId);
     if (result.success) {
+      await ctx.clearOauthLimitsCache(ctx.editingProviderId);
       ctx.setOauthStatus(null);
       // 缓存也写为未连接：否则 5 分钟内重开弹窗会命中"仍已连接"的旧快照。
       ctx.writeOauthStatusCache(null, ctx.editingProviderId);

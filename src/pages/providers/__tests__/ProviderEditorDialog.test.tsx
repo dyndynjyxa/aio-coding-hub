@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render as rtlRender,
@@ -27,6 +28,7 @@ import {
   providerOAuthStartFlow,
   providerOAuthStatus,
   providerUpsert,
+  type OAuthLimitsResult,
   type ProviderOAuthDeviceCodeStartResult,
   type ProviderOAuthRefreshResult,
   type ProviderOAuthStartFlowResult,
@@ -34,6 +36,8 @@ import {
   type ProviderSummary,
 } from "../../../services/providers/providers";
 import { usePluginActiveContributionsQuery } from "../../../query/plugins";
+import { oauthLimitsKeys } from "../../../query/keys";
+import { readProviderOAuthLimitsCache, refreshProviderOAuthLimits } from "../../../query/providers";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import type { ProviderEditorInitialValues } from "../providerDuplicate";
 
@@ -196,11 +200,39 @@ function makeOAuthDeviceStartResult(
   };
 }
 
+function makeOAuthLimits(estimatedTotalUsd: number): OAuthLimitsResult {
+  return {
+    limit_short_label: "5h",
+    limit_5h_text: "80%",
+    limit_weekly_text: null,
+    limit_5h_reset_at: 1_800_018_000,
+    limit_weekly_reset_at: null,
+    reset_credit_available_count: 2,
+    credits: null,
+    limit_5h_remaining_percent: 80,
+    limit_weekly_remaining_percent: null,
+    routing_limited: false,
+    quota_estimates: {
+      short: {
+        used_usd: estimatedTotalUsd * 0.2,
+        estimated_total_usd: estimatedTotalUsd,
+        estimated_remaining_usd: estimatedTotalUsd * 0.8,
+        window_start: 1_800_000_000,
+        window_end: 1_800_018_000,
+        sample_count: 5,
+        unpriced_count: 0,
+      },
+      weekly: null,
+    },
+  };
+}
+
 function renderDialog(ui: ReactElement) {
   const client = createTestQueryClient();
   const view = rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
   return {
     ...view,
+    client,
     rerender: (nextUi: ReactElement) =>
       view.rerender(<QueryClientProvider client={client}>{nextUi}</QueryClientProvider>),
   };
@@ -2041,6 +2073,131 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
+  describe.each(["browser", "device"] as const)("OAuth quota cache after %s login", (method) => {
+    const connectedStatus = makeOAuthStatus({
+      connected: true,
+      provider_type: "codex_oauth",
+      email: "account-b@example.invalid",
+    });
+
+    beforeEach(() => {
+      vi.mocked(providerOAuthStatus)
+        .mockResolvedValueOnce(makeOAuthStatus())
+        .mockResolvedValue(connectedStatus);
+      vi.mocked(providerOAuthStartFlow).mockResolvedValue(
+        makeOAuthStartFlowResult({ provider_type: "codex_oauth" })
+      );
+      vi.mocked(providerOAuthStartDeviceFlow).mockResolvedValue(makeOAuthDeviceStartResult());
+      vi.mocked(providerOAuthPollDeviceFlow).mockResolvedValue({
+        completed: true,
+        provider_id: 1,
+        provider_type: "codex_oauth",
+        expires_at: null,
+      });
+      vi.mocked(openDesktopUrl).mockResolvedValue(true);
+    });
+
+    function renderLogin() {
+      const client = createTestQueryClient();
+      client.setQueryData(oauthLimitsKeys.detail(1), makeOAuthLimits(100));
+      client.setQueryData(oauthLimitsKeys.detail(2), makeOAuthLimits(200));
+      rtlRender(
+        <QueryClientProvider client={client}>
+          <ProviderEditorDialog
+            mode="edit"
+            open
+            provider={makeProvider({ cli_key: "codex", auth_mode: "oauth" })}
+            onSaved={vi.fn()}
+            onOpenChange={vi.fn()}
+          />
+        </QueryClientProvider>
+      );
+      return client;
+    }
+
+    async function startLogin() {
+      await waitFor(() => expect(providerOAuthStatus).toHaveBeenCalledWith(1));
+      fireEvent.click(
+        screen.getByRole("button", { name: method === "browser" ? "OAuth 登录" : "设备码登录" })
+      );
+    }
+
+    it("replaces the previous account's estimates and ignores its late usage response", async () => {
+      let resolveOldLimits!: (value: OAuthLimitsResult) => void;
+      vi.mocked(providerOAuthFetchLimits)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveOldLimits = resolve;
+            })
+        )
+        .mockResolvedValue(makeOAuthLimits(5));
+      const client = renderLogin();
+      const oldRefresh = refreshProviderOAuthLimits(client, 1).catch(() => null);
+
+      await startLogin();
+
+      await waitFor(() =>
+        expect(toast).toHaveBeenCalledWith(
+          method === "browser" ? "OAuth 登录成功" : "设备码登录成功"
+        )
+      );
+      expect(readProviderOAuthLimitsCache(client, 1)).toEqual(makeOAuthLimits(5));
+      await act(async () => {
+        resolveOldLimits(makeOAuthLimits(100));
+        await oldRefresh;
+      });
+      expect(readProviderOAuthLimitsCache(client, 1)).toEqual(makeOAuthLimits(5));
+      expect(readProviderOAuthLimitsCache(client, 2)).toEqual(makeOAuthLimits(200));
+    });
+
+    it.each(["status", "limits", "empty limits"])(
+      "clears the previous account before status refresh even when %s fails",
+      async (failure) => {
+        let resolveStatus!: (value: ProviderOAuthStatusResult) => void;
+        let rejectStatus!: (reason: Error) => void;
+        vi.mocked(providerOAuthStatus)
+          .mockReset()
+          .mockResolvedValueOnce(makeOAuthStatus())
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve, reject) => {
+                resolveStatus = resolve;
+                rejectStatus = reject;
+              })
+          );
+        if (failure === "empty limits") {
+          vi.mocked(providerOAuthFetchLimits).mockResolvedValue(null);
+        } else {
+          vi.mocked(providerOAuthFetchLimits).mockRejectedValue(new Error("usage unavailable"));
+        }
+        const client = renderLogin();
+
+        await startLogin();
+        await waitFor(() => expect(providerOAuthStatus).toHaveBeenCalledTimes(2));
+        expect(readProviderOAuthLimitsCache(client, 1)?.quota_estimates).toBeFalsy();
+        expect(readProviderOAuthLimitsCache(client, 1)?.limit_5h_text).toBeFalsy();
+
+        await act(async () => {
+          if (failure === "status") rejectStatus(new Error("status unavailable"));
+          else resolveStatus(connectedStatus);
+        });
+        await waitFor(() =>
+          expect(toast).toHaveBeenCalledWith(
+            method === "device" && failure === "status"
+              ? "设备码登录失败：Error: status unavailable"
+              : method === "browser"
+                ? "OAuth 登录成功"
+                : "设备码登录成功"
+          )
+        );
+        expect(readProviderOAuthLimitsCache(client, 1)?.quota_estimates).toBeFalsy();
+        expect(readProviderOAuthLimitsCache(client, 1)?.limit_5h_text).toBeFalsy();
+        expect(readProviderOAuthLimitsCache(client, 2)).toEqual(makeOAuthLimits(200));
+      }
+    );
+  });
+
   it("keeps auto-saved provider when OAuth succeeds but status sync fails", async () => {
     vi.mocked(providerUpsert).mockResolvedValueOnce(
       makeProvider({
@@ -2854,7 +3011,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
 
     const provider = makeProvider({ auth_mode: "oauth" });
-    render(
+    const { client } = render(
       <ProviderEditorDialog
         mode="edit"
         open={true}
@@ -2863,6 +3020,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         onOpenChange={vi.fn()}
       />
     );
+    client.setQueryData(oauthLimitsKeys.detail(1), makeOAuthLimits(100));
 
     // Wait for OAuth status to load and show the connected UI
     await waitFor(() => {
@@ -2873,6 +3031,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     await waitFor(() => expect(vi.mocked(providerOAuthRefresh)).toHaveBeenCalledWith(1));
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("Token 刷新成功"));
+    expect(readProviderOAuthLimitsCache(client, 1)).toEqual(makeOAuthLimits(100));
   });
 
   it("handles OAuth disconnect in edit mode", async () => {
@@ -2887,7 +3046,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthDisconnect).mockResolvedValueOnce({ success: true });
 
     const provider = makeProvider({ auth_mode: "oauth" });
-    render(
+    const { client } = render(
       <ProviderEditorDialog
         mode="edit"
         open={true}
@@ -2896,6 +3055,16 @@ describe("pages/providers/ProviderEditorDialog", () => {
         onOpenChange={vi.fn()}
       />
     );
+    client.setQueryData(oauthLimitsKeys.detail(1), makeOAuthLimits(100));
+    client.setQueryData(oauthLimitsKeys.detail(2), makeOAuthLimits(200));
+    let resolveOldLimits!: (value: OAuthLimitsResult) => void;
+    vi.mocked(providerOAuthFetchLimits).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOldLimits = resolve;
+        })
+    );
+    const oldRefresh = refreshProviderOAuthLimits(client, 1).catch(() => null);
 
     await waitFor(() => {
       expect(screen.getByText("断开连接")).toBeInTheDocument();
@@ -2905,6 +3074,13 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     await waitFor(() => expect(vi.mocked(providerOAuthDisconnect)).toHaveBeenCalledWith(1));
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已断开 OAuth 连接"));
+    expect(readProviderOAuthLimitsCache(client, 1)).toBeNull();
+    await act(async () => {
+      resolveOldLimits(makeOAuthLimits(100));
+      await oldRefresh;
+    });
+    expect(readProviderOAuthLimitsCache(client, 1)).toBeNull();
+    expect(readProviderOAuthLimitsCache(client, 2)).toEqual(makeOAuthLimits(200));
   });
 
   it("validates OAuth connection before save in OAuth mode", async () => {
@@ -3111,7 +3287,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthDisconnect).mockResolvedValueOnce({ success: false });
 
     const provider = makeProvider({ auth_mode: "oauth" });
-    render(
+    const { client } = render(
       <ProviderEditorDialog
         mode="edit"
         open={true}
@@ -3120,6 +3296,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         onOpenChange={vi.fn()}
       />
     );
+    client.setQueryData(oauthLimitsKeys.detail(1), makeOAuthLimits(100));
 
     await waitFor(() => {
       expect(screen.getByText("断开连接")).toBeInTheDocument();
@@ -3128,6 +3305,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.click(screen.getByText("断开连接"));
 
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("断开 OAuth 连接失败"));
+    expect(readProviderOAuthLimitsCache(client, 1)).toEqual(makeOAuthLimits(100));
   });
 
   it("handles OAuth disconnect error", async () => {
@@ -3141,7 +3319,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthDisconnect).mockRejectedValueOnce(new Error("disconnect boom"));
 
     const provider = makeProvider({ auth_mode: "oauth" });
-    render(
+    const { client } = render(
       <ProviderEditorDialog
         mode="edit"
         open={true}
@@ -3150,6 +3328,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         onOpenChange={vi.fn()}
       />
     );
+    client.setQueryData(oauthLimitsKeys.detail(1), makeOAuthLimits(100));
 
     await waitFor(() => {
       expect(screen.getByText("断开连接")).toBeInTheDocument();
@@ -3160,6 +3339,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() =>
       expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("断开 OAuth 连接失败"))
     );
+    expect(readProviderOAuthLimitsCache(client, 1)).toEqual(makeOAuthLimits(100));
   });
 
   it("OAuth login with null fetch limits shows warning", async () => {

@@ -20,6 +20,7 @@ import {
 } from "../../services/providers/providers";
 import { gatewayCircuitResetProvider } from "../../services/gateway/gateway";
 import {
+  clearProviderOAuthLimitsCache,
   fetchProviderOAuthStatus,
   writeProviderOAuthStatusCache,
   readProviderOAuthLimitsCache,
@@ -421,6 +422,49 @@ describe("query/providers", () => {
     ).resolves.toMatchObject({ limit_5h_text: "0%" });
 
     expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
+  });
+
+  it("clears an observed quota immediately and keeps null refreshes empty until new limits arrive", async () => {
+    const limits = {
+      limit_short_label: "5h",
+      limit_5h_text: "80%",
+      limit_weekly_text: null,
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 2,
+      credits: { has_credits: true, unlimited: false, balance: "100" },
+      limit_5h_remaining_percent: 80,
+      limit_weekly_remaining_percent: null,
+      routing_limited: false,
+    };
+    const client = createTestQueryClient();
+    client.setQueryData(oauthLimitsKeys.detail(11), limits);
+    const { result } = renderHook(() => useOAuthLimitsQuery(11, false), {
+      wrapper: createQueryWrapper(client),
+    });
+    expect(result.current.data).toEqual(limits);
+
+    await act(async () => {
+      await clearProviderOAuthLimitsCache(client, 11);
+    });
+    await waitFor(() => expect(result.current.data?.limit_5h_text).toBeNull());
+    expect(result.current.data?.credits).toBeNull();
+    expect(result.current.data?.quota_estimates).toBeNull();
+    expect(readProviderOAuthLimitsCache(client, 11)).toBeNull();
+    expect(providerOAuthFetchLimits).not.toHaveBeenCalled();
+
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce(null);
+    await act(async () => {
+      await expect(refreshProviderOAuthLimits(client, 11)).resolves.toBeNull();
+    });
+    expect(readProviderOAuthLimitsCache(client, 11)).toBeNull();
+    expect(result.current.data?.limit_5h_text).toBeNull();
+
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce(limits);
+    await act(async () => {
+      await refreshProviderOAuthLimits(client, 11);
+    });
+    await waitFor(() => expect(result.current.data).toEqual(limits));
   });
 
   it("refreshes credits only for the target provider and keeps them after a failed refresh", async () => {

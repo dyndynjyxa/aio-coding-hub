@@ -1,6 +1,7 @@
 import type {
   ClaudeModels,
   CliKey,
+  OAuthLimitsResult,
   ProviderCustomHeader,
   ProviderOAuthDeviceCodeStartResult,
   ProviderOAuthStatusResult,
@@ -141,6 +142,8 @@ export type OAuthActionContext = ProviderActionContext &
     | "oauthDeviceError"
     | "setOauthDeviceError"
   > & {
+    clearOauthLimitsCache: (providerId: number) => Promise<void>;
+    refreshOauthLimits: (providerId: number) => Promise<OAuthLimitsResult | null>;
     persistProvider: (input: ProviderUpsertInput) => Promise<ProviderSummary>;
     removeProvider: (providerId: number) => Promise<boolean>;
     beginOAuthLoginAttempt: () => number;
