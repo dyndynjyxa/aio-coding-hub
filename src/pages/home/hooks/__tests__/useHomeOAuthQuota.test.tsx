@@ -405,6 +405,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       credits: null,
     };
     const refreshedA = {
+      limit_window_seconds: [18000, 604800] as [number, number],
       quota_estimates: null,
       limit_short_label: "5h",
       limit_5h_text: "100%",

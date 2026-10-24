@@ -661,8 +661,9 @@ fn insert_batch_once(
 		  created_at,
 		  final_provider_id,
 		  provider_chain_json,
-		  error_details_json
-		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
+		  error_details_json,
+		  cost_source_provider_id
+		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)
 		ON CONFLICT(trace_id) DO UPDATE SET
 		  method = excluded.method,
 		  path = excluded.path,
@@ -698,6 +699,7 @@ fn insert_batch_once(
 		  activity_details_json = COALESCE(request_logs.activity_details_json, excluded.activity_details_json),
 		  created_at = CASE WHEN request_logs.created_at = 0 THEN excluded.created_at ELSE request_logs.created_at END,
 		  final_provider_id = excluded.final_provider_id,
+		  cost_source_provider_id = excluded.cost_source_provider_id,
 		  provider_chain_json = excluded.provider_chain_json,
 		  error_details_json = excluded.error_details_json
 		WHERE NOT (
@@ -843,6 +845,10 @@ fn insert_batch_once(
                 final_provider_id_db,
                 item.provider_chain_json,
                 item.error_details_json,
+                semantics::resolve_cx2cc_source_provider_id(
+                    item.special_settings_json.as_deref(),
+                    final_provider_id_db,
+                ),
             ])
             .map_err(|e| DbWriteError::from_rusqlite("failed to insert request_log", e))?;
         }
@@ -1596,6 +1602,47 @@ WHERE trace_id = ?1
             parse_cx2cc_cost_basis(Some(&special_settings_json), Some(12)),
             Some(("codex".to_string(), "gpt-5.4".to_string()))
         );
+    }
+
+    #[test]
+    fn writer_updates_cost_source_with_final_attempt_and_keeps_request_start() {
+        let (app, db, _dir) = init_test_db();
+        let mut item = RequestLogInsert {
+            special_settings_json: Some(
+                serde_json::json!([{
+                    "type": "cx2cc_cost_basis",
+                    "bridge_provider_id": 12,
+                    "source_provider_id": 42,
+                }])
+                .to_string(),
+            ),
+            ..request_log_insert("trace-cost-source")
+        };
+        let started_at = item.created_at;
+        let mut cache = InsertBatchCache::default();
+        for (final_provider, source) in [(12, Some(42)), (13, None), (12, Some(42))] {
+            item.attempts_json = serde_json::json!([{
+                "provider_id": final_provider,
+                "provider_name": "final",
+                "outcome": "success",
+                "status": 200,
+            }])
+            .to_string();
+            insert_batch_once(app.handle(), &db, std::slice::from_ref(&item), &mut cache).unwrap();
+            let actual: (i64, Option<i64>, i64) = db
+                .open_connection()
+                .unwrap()
+                .query_row(
+                    "SELECT final_provider_id, cost_source_provider_id, created_at
+                     FROM request_logs WHERE trace_id = 'trace-cost-source'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(actual, (final_provider, source, started_at));
+            item.created_at += 10;
+            item.created_at_ms += 10_000;
+        }
     }
 
     #[test]

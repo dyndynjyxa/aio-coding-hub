@@ -112,6 +112,7 @@ const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {
   limit_5h_remaining_percent: null,
   limit_weekly_remaining_percent: null,
   routing_limited: false,
+  limit_window_seconds: [null, null],
   quota_estimates: null,
 };
 
@@ -177,10 +178,15 @@ export async function resetProviderOAuthCodexQuota(
   const normalizedProviderId = validateProviderId(providerId);
   const result = await providerOAuthResetCodexQuota(normalizedProviderId);
   const refreshedLimits = result.refreshed_limits;
+  const queryKey = oauthLimitsKeys.detail(normalizedProviderId);
 
+  if (result.success || refreshedLimits) {
+    // An older usage fetch must not restore the pre-reset estimates.
+    await queryClient.cancelQueries({ queryKey, exact: true });
+  }
   if (refreshedLimits) {
     const next = normalizeProviderOAuthLimitsResult(refreshedLimits);
-    queryClient.setQueryData(oauthLimitsKeys.detail(normalizedProviderId), next);
+    queryClient.setQueryData(queryKey, next);
     try {
       if (options?.resetCircuitAfterRefresh) {
         try {
@@ -195,6 +201,10 @@ export async function resetProviderOAuthCodexQuota(
     } finally {
       void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
     }
+  } else if (result.success) {
+    queryClient.setQueryData<OAuthLimitsResult>(queryKey, (previous) =>
+      previous ? { ...previous, quota_estimates: null } : previous
+    );
   }
 
   return result;

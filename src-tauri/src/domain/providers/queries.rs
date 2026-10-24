@@ -1498,6 +1498,8 @@ SET
   base_urls_json = ?3,
   base_url_mode = ?4,
   auth_mode = ?5,
+  oauth_cost_start_at = CASE WHEN auth_mode != ?5
+    THEN MAX(COALESCE(oauth_cost_start_at, 0), ?27 + 1) ELSE oauth_cost_start_at END,
   claude_models_json = ?6,
   model_policy_json = ?7,
   supported_models_json = ?8,
@@ -2030,6 +2032,7 @@ UPDATE providers SET
   oauth_expires_at = ?9,
   oauth_email = ?10,
   oauth_last_refreshed_at = ?11,
+  oauth_cost_start_at = MAX(COALESCE(oauth_cost_start_at, 0), ?11 + 1),
   oauth_last_error = NULL,
   updated_at = ?11
 WHERE id = ?12

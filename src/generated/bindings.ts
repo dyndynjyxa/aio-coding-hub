@@ -3759,6 +3759,7 @@ export type ProviderOAuthLimitsResult = {
   limit_weekly_remaining_percent: number | null;
   routing_limited: boolean;
   quota_estimates: ProviderOAuthQuotaEstimates | null;
+  limit_window_seconds: [number | null, number | null];
 };
 export type ProviderOAuthQuotaEstimates = {
   short: OAuthQuotaEstimate | null;

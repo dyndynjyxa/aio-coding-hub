@@ -527,6 +527,7 @@ describe("query/providers", () => {
     };
     const refreshedLimits = {
       quota_estimates: null,
+      limit_window_seconds: [18000, 604800] as [number, number],
       limit_short_label: "5h",
       limit_5h_text: "100%",
       limit_weekly_text: "100%",
@@ -550,10 +551,23 @@ describe("query/providers", () => {
     const client = createTestQueryClient();
     client.setQueryData(oauthLimitsKeys.detail(11), oldTargetLimits);
     client.setQueryData(oauthLimitsKeys.detail(22), otherLimits);
+    let resolveStale!: (value: typeof oldTargetLimits) => void;
+    const inFlight = client
+      .fetchQuery({
+        queryKey: oauthLimitsKeys.detail(11),
+        queryFn: () =>
+          new Promise<typeof oldTargetLimits>((resolve) => {
+            resolveStale = resolve;
+          }),
+        staleTime: 0,
+      })
+      .catch(() => null);
 
     await expect(
       resetProviderOAuthCodexQuota(client, 11, { resetCircuitAfterRefresh: true })
     ).resolves.toMatchObject({ success: true, refreshed_limits: refreshedLimits });
+    resolveStale(oldTargetLimits);
+    await inFlight;
 
     expect(providerOAuthResetCodexQuota).toHaveBeenCalledWith(11);
     expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
@@ -561,7 +575,7 @@ describe("query/providers", () => {
     expect(client.getQueryData(oauthLimitsKeys.detail(22))).toEqual(otherLimits);
   });
 
-  it("resetProviderOAuthCodexQuota preserves cached limits on partial success", async () => {
+  it("resetProviderOAuthCodexQuota clears estimates on partial success and rejects a late old fetch", async () => {
     setTauriRuntime();
     vi.mocked(gatewayCircuitResetProvider).mockClear();
 
@@ -576,6 +590,18 @@ describe("query/providers", () => {
       limit_weekly_remaining_percent: null,
       routing_limited: false,
       credits: null,
+      quota_estimates: {
+        short: {
+          used_usd: 20,
+          estimated_total_usd: 100,
+          estimated_remaining_usd: 80,
+          window_start: 1_800_000_000,
+          window_end: 1_800_018_000,
+          sample_count: 3,
+          unpriced_count: 0,
+        },
+        weekly: null,
+      },
     };
     vi.mocked(providerOAuthResetCodexQuota).mockResolvedValueOnce({
       success: true,
@@ -587,14 +613,30 @@ describe("query/providers", () => {
 
     const client = createTestQueryClient();
     client.setQueryData(oauthLimitsKeys.detail(11), oldLimits);
+    let resolveStale!: (value: typeof oldLimits) => void;
+    const inFlight = client
+      .fetchQuery({
+        queryKey: oauthLimitsKeys.detail(11),
+        queryFn: () =>
+          new Promise<typeof oldLimits>((resolve) => {
+            resolveStale = resolve;
+          }),
+        staleTime: 0,
+      })
+      .catch(() => null);
 
     await expect(resetProviderOAuthCodexQuota(client, 11)).resolves.toMatchObject({
       success: true,
       refreshed_limits: null,
       refresh_error: "usage refresh failed",
     });
+    resolveStale(oldLimits);
+    await inFlight;
 
-    expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual(oldLimits);
+    expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual({
+      ...oldLimits,
+      quota_estimates: null,
+    });
     expect(gatewayCircuitResetProvider).not.toHaveBeenCalled();
   });
 

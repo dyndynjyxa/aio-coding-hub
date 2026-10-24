@@ -66,6 +66,26 @@ pub(crate) fn resolve_cx2cc_cost_basis(
     }
 }
 
+pub(crate) fn resolve_cx2cc_source_provider_id(
+    special_settings_json: Option<&str>,
+    final_provider_id: Option<i64>,
+) -> Option<i64> {
+    let final_provider_id = final_provider_id.filter(|id| *id > 0)?;
+    let settings: Vec<Value> = serde_json::from_str(special_settings_json?).ok()?;
+    settings.iter().rev().find_map(|setting| {
+        let object = setting.as_object()?;
+        if object.get("type").and_then(Value::as_str) != Some("cx2cc_cost_basis")
+            || object.get("bridge_provider_id").and_then(Value::as_i64) != Some(final_provider_id)
+        {
+            return None;
+        }
+        object
+            .get("source_provider_id")
+            .and_then(Value::as_i64)
+            .filter(|id| *id > 0)
+    })
+}
+
 /// The reasoning effort that actually answered: the last success attempt's value,
 /// else the last attempt whose request reached the upstream. Shared by the gateway
 /// request event and the persisted-log queries so the two never drift.

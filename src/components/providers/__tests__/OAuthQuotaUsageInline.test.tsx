@@ -57,6 +57,9 @@ describe("OAuthQuotaUsageInline quota estimates", () => {
         cliKey="codex"
         nowUnix={now}
         limits={limits({
+          limit_weekly_text: "80%",
+          limit_weekly_reset_at: now + 3600,
+          limit_window_seconds: [604800, 7200],
           quota_estimates: {
             short: { ...estimate, window_end: estimate.window_start + 7 * 24 * 3600 },
             weekly: { ...estimate, window_end: estimate.window_start + 2 * 3600 },
@@ -66,6 +69,26 @@ describe("OAuthQuotaUsageInline quota estimates", () => {
     );
     expect(screen.getByText("预估额度(周): ~$100.00(剩余 ~$80.00)")).toBeInTheDocument();
     expect(screen.getByText("预估额度(2h): ~$100.00(剩余 ~$80.00)")).toBeInTheDocument();
+    expect(screen.getByText("2h: 80%(重置时间: 1h)")).toBeInTheDocument();
+    expect(screen.getByText(/^周: 80%/)).toBeInTheDocument();
+  });
+
+  it("keeps upstream window labels when cost estimates are unavailable", () => {
+    render(
+      <OAuthQuotaUsageInline
+        cliKey="codex"
+        nowUnix={now}
+        limits={limits({
+          limit_weekly_text: "80%",
+          limit_weekly_reset_at: now + 3600,
+          limit_window_seconds: [604800, 7200],
+          quota_estimates: null,
+        })}
+      />
+    );
+    expect(screen.getByText(/^周: 80%/)).toBeInTheDocument();
+    expect(screen.getByText("2h: 80%(重置时间: 1h)")).toBeInTheDocument();
+    expect(screen.queryByText(/预估额度/)).not.toBeInTheDocument();
   });
 
   it("keeps a partial-cost estimate visible and explains missing costs on refresh", () => {

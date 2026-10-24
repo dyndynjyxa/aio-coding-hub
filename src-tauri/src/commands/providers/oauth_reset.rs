@@ -299,6 +299,10 @@ pub(crate) async fn provider_oauth_reset_codex_quota(
             .clone()
             .map(|error| (details.oauth_access_token.clone(), Err(error))),
     };
+    drop(quota_guard);
+    if let Some(ref mut refreshed_limits) = result.refreshed_limits {
+        limits::attach_quota_estimates(&db, provider_id, refreshed_limits).await;
+    }
     Ok(result)
 }
 

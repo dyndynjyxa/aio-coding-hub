@@ -8,14 +8,20 @@ export type OAuthQuotaUsageSegment = {
   resetCreditCount?: number;
 };
 
-function getOAuthShortWindowLabel(cliKey: CliKey, limits: OAuthLimitsResult | null): string {
-  if (cliKey === "gemini") return "短窗";
-  const shortEstimate = limits?.quota_estimates?.short;
-  if (shortEstimate) {
-    const seconds = shortEstimate.window_end - shortEstimate.window_start;
-    if (seconds > 0 && Number.isFinite(seconds)) return formatWindowLabel(seconds);
+function getOAuthWindowLabel(
+  cliKey: CliKey,
+  limits: OAuthLimitsResult,
+  window: "short" | "weekly"
+): string {
+  if (cliKey === "gemini" && window === "short") return "短窗";
+  const estimate = limits.quota_estimates?.[window];
+  const seconds =
+    limits.limit_window_seconds?.[window === "short" ? 0 : 1] ??
+    (estimate ? estimate.window_end - estimate.window_start : null);
+  if (seconds != null && seconds > 0 && Number.isFinite(seconds)) {
+    return formatWindowLabel(seconds);
   }
-  return limits?.limit_short_label ?? "5h";
+  return window === "short" ? (limits.limit_short_label ?? "5h") : "周";
 }
 
 function formatWindowLabel(seconds: number): string {
@@ -58,7 +64,8 @@ function buildOAuthQuotaUsageSegments({
 }): OAuthQuotaUsageSegment[] {
   if (!limits) return [];
 
-  const shortLabel = getOAuthShortWindowLabel(cliKey, limits);
+  const shortLabel = getOAuthWindowLabel(cliKey, limits, "short");
+  const weeklyLabel = getOAuthWindowLabel(cliKey, limits, "weekly");
   const segments: OAuthQuotaUsageSegment[] = [];
 
   if (limits.limit_5h_text) {
@@ -79,11 +86,11 @@ function buildOAuthQuotaUsageSegments({
     segments.push({
       key: "weekly",
       text: weeklyReset
-        ? `周: ${limits.limit_weekly_text}(重置时间: ${weeklyReset})`
-        : `周: ${limits.limit_weekly_text}`,
+        ? `${weeklyLabel}: ${limits.limit_weekly_text}(重置时间: ${weeklyReset})`
+        : `${weeklyLabel}: ${limits.limit_weekly_text}`,
       title: weeklyReset
-        ? `周用量: ${limits.limit_weekly_text}，重置时间: ${weeklyReset}`
-        : `周用量: ${limits.limit_weekly_text}`,
+        ? `${weeklyLabel}用量: ${limits.limit_weekly_text}，重置时间: ${weeklyReset}`
+        : `${weeklyLabel}用量: ${limits.limit_weekly_text}`,
     });
   }
 
@@ -95,7 +102,7 @@ function buildOAuthQuotaUsageSegments({
       if (!estimate) continue;
       const seconds = estimate.window_end - estimate.window_start;
       if (seconds <= 0 || !Number.isFinite(seconds)) continue;
-      const label = formatWindowLabel(seconds);
+      const label = key === "shortEstimate" ? shortLabel : weeklyLabel;
       const prefix = `预估额度(${label})`;
       const hint = "根据本窗口本地费用与账号已用比例换算，仅供参考；外部使用或模型变化会影响预估。";
       const total = estimate.estimated_total_usd;
@@ -241,13 +248,27 @@ export function OAuthQuotaUsageInline({
           );
         }
 
+        const isEstimate = segment.key === "shortEstimate" || segment.key === "weeklyEstimate";
+        const breakAt = isEstimate ? segment.text.indexOf("(剩余") : -1;
         return (
           <span
             key={segment.key}
-            className={cn("shrink-0 font-mono text-xs text-muted-foreground", segmentClassName)}
+            className={cn(
+              "font-mono text-xs text-muted-foreground",
+              isEstimate ? "min-w-0 max-w-full break-words" : "shrink-0",
+              segmentClassName
+            )}
             title={segment.title}
           >
-            {segment.text}
+            {breakAt >= 0 ? (
+              <>
+                {segment.text.slice(0, breakAt)}
+                <wbr />
+                {segment.text.slice(breakAt)}
+              </>
+            ) : (
+              segment.text
+            )}
           </span>
         );
       })}

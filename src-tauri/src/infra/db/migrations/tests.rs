@@ -1025,6 +1025,7 @@ INSERT INTO providers(
         "oauth_expires_at",
         "oauth_email",
         "oauth_last_refreshed_at",
+        "oauth_cost_start_at",
         "oauth_last_error",
         "oauth_refresh_lead_s",
     ] {
@@ -1043,6 +1044,104 @@ INSERT INTO providers(
 
     // Idempotent: second run should succeed.
     apply_migrations(&mut conn).expect("apply migrations twice");
+}
+
+#[test]
+fn oauth_cost_migration_backfills_historical_sources_once_and_preserves_logs() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    apply_migrations(&mut conn).unwrap();
+    conn.execute_batch(
+        "DROP INDEX idx_request_logs_cost_source_created_at;
+         ALTER TABLE request_logs DROP COLUMN cost_source_provider_id;
+         ALTER TABLE providers DROP COLUMN oauth_cost_start_at;
+         INSERT INTO providers(id, cli_key, name, base_url, api_key_plaintext, created_at, updated_at, auth_mode)
+         VALUES (901, 'codex', 'oauth', '', '', 1, 1, 'oauth'),
+                (902, 'claude', 'api-key', '', '', 1, 1, 'api_key');",
+    )
+    .unwrap();
+    let marker = |source| {
+        serde_json::json!({
+            "type": "cx2cc_cost_basis", "bridge_provider_id": 902,
+            "source_provider_id": source
+        })
+    };
+    let rows = [
+        (
+            Some(902),
+            serde_json::json!([marker(900), null, marker(901), marker(901)]).to_string(),
+            Some(901),
+        ),
+        (
+            Some(901),
+            serde_json::json!([marker(901)]).to_string(),
+            None,
+        ),
+        (Some(902), "not JSON".to_string(), None),
+        (Some(902), marker(901).to_string(), None),
+        (Some(902), "null".to_string(), None),
+        (None, serde_json::json!([marker(901)]).to_string(), None),
+        (
+            Some(902),
+            serde_json::json!([marker(0), marker(-1), {
+                "type": "cx2cc_cost_basis", "bridge_provider_id": 902,
+                "source_provider_id": "901"
+            }])
+            .to_string(),
+            None,
+        ),
+    ];
+    for (index, (provider, settings, _)) in rows.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO request_logs(trace_id, cli_key, method, path, created_at,
+              final_provider_id, special_settings_json)
+             VALUES (?1, 'claude', 'POST', '/v1/messages', 1, ?2, ?3)",
+            rusqlite::params![index.to_string(), provider, settings],
+        )
+        .unwrap();
+    }
+    let before = crate::shared::time::now_unix_seconds();
+    apply_migrations(&mut conn).unwrap();
+    let boundary: i64 = conn
+        .query_row(
+            "SELECT oauth_cost_start_at FROM providers WHERE id = 901",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(boundary > before);
+    let api_key_boundary: Option<i64> = conn
+        .query_row(
+            "SELECT oauth_cost_start_at FROM providers WHERE id = 902",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(api_key_boundary.is_none());
+    for (index, (_, settings, expected)) in rows.iter().enumerate() {
+        let actual: (String, Option<i64>) = conn
+            .query_row(
+                "SELECT special_settings_json, cost_source_provider_id FROM request_logs WHERE trace_id = ?1",
+                [index.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(actual, (settings.clone(), *expected));
+    }
+    conn.execute_batch(
+        "UPDATE providers SET oauth_cost_start_at = 123 WHERE id = 901;
+         UPDATE request_logs SET special_settings_json = '[]' WHERE trace_id = '0';",
+    )
+    .unwrap();
+    apply_migrations(&mut conn).unwrap();
+    let unchanged: (i64, i64) = conn
+        .query_row(
+            "SELECT p.oauth_cost_start_at, r.cost_source_provider_id
+             FROM providers p, request_logs r WHERE p.id = 901 AND r.trace_id = '0'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(unchanged, (123, 901));
 }
 
 #[test]

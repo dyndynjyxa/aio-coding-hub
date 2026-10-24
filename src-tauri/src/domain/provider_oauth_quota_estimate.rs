@@ -4,6 +4,22 @@ use crate::shared::error::{db_err, AppResult};
 use rusqlite::{params, Connection};
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
+const WINDOW_COST_SQL: &str = r#"
+SELECT
+  TOTAL(CASE WHEN cost_usd_femto >= 0 THEN cost_usd_femto ELSE 0 END),
+  COUNT(*),
+  COUNT(CASE WHEN cost_usd_femto IS NULL OR cost_usd_femto < 0 THEN 1 END)
+FROM (
+  SELECT cost_usd_femto FROM request_logs
+  WHERE final_provider_id = ?1 AND created_at >= ?2 AND created_at <= ?3
+    AND excluded_from_stats = 0 AND status >= 200 AND status < 300 AND error_code IS NULL
+  UNION ALL
+  SELECT cost_usd_femto FROM request_logs
+  WHERE cost_source_provider_id = ?1 AND created_at >= ?2 AND created_at <= ?3
+    AND final_provider_id IS NOT ?1
+    AND excluded_from_stats = 0 AND status >= 200 AND status < 300 AND error_code IS NULL
+)
+"#;
 
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub(crate) struct OAuthQuotaEstimate {
@@ -27,6 +43,7 @@ pub(crate) struct OAuthQuotaWindow {
     pub remaining_percent: Option<f64>,
     pub reset_at: Option<i64>,
     pub duration_seconds: Option<i64>,
+    pub cost_start_at: Option<i64>,
 }
 
 /// A reset-aligned window keeps the numerator and upstream utilization on the
@@ -55,36 +72,15 @@ pub(crate) fn estimate_window(
     else {
         return Ok(None);
     };
+    let cost_start_at = start_at.max(window.cost_start_at.unwrap_or(start_at));
 
     // TOTAL avoids SQLite integer-SUM overflow. Like sub2api, estimate from
     // recorded costs even when other requests are unpriced. Keep their count
     // so the UI can explain that the estimate may be incomplete.
     let (cost_femto, sample_count, unpriced_count): (f64, i64, i64) = conn
         .query_row(
-            r#"
-SELECT
-  TOTAL(CASE WHEN cost_usd_femto >= 0 THEN cost_usd_femto ELSE 0 END),
-  COUNT(*),
-  COUNT(CASE WHEN cost_usd_femto IS NULL OR cost_usd_femto < 0 THEN 1 END)
-FROM request_logs r
-WHERE r.created_at >= ?2 AND r.created_at <= ?3
-  AND r.excluded_from_stats = 0
-  AND r.status >= 200 AND r.status < 300
-  AND r.error_code IS NULL
-  AND (
-    r.final_provider_id = ?1
-    OR EXISTS (
-      SELECT 1 FROM json_each(
-        CASE WHEN json_valid(r.special_settings_json)
-             THEN r.special_settings_json ELSE '[]' END
-      ) entry
-      WHERE json_extract(CASE WHEN entry.type = 'object' THEN entry.value END, '$.type') = 'cx2cc_cost_basis'
-        AND json_extract(CASE WHEN entry.type = 'object' THEN entry.value END, '$.source_provider_id') = ?1
-        AND json_extract(CASE WHEN entry.type = 'object' THEN entry.value END, '$.bridge_provider_id') = r.final_provider_id
-    )
-  )
-"#,
-            params![provider_id, start_at, now_unix],
+            WINDOW_COST_SQL,
+            params![provider_id, cost_start_at, now_unix],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|e| db_err!("failed to query OAuth quota estimate costs: {e}"))?;
@@ -121,7 +117,7 @@ mod tests {
             "CREATE TABLE request_logs (
               final_provider_id INTEGER, created_at INTEGER, status INTEGER,
               excluded_from_stats INTEGER DEFAULT 0, error_code TEXT, cost_usd_femto INTEGER,
-              special_settings_json TEXT
+              special_settings_json TEXT, cost_source_provider_id INTEGER
             );",
         )
         .unwrap();
@@ -142,6 +138,7 @@ mod tests {
             remaining_percent: Some(remaining),
             reset_at: Some(RESET),
             duration_seconds: Some(5 * 3600),
+            cost_start_at: None,
         }
     }
 
@@ -200,6 +197,66 @@ mod tests {
         assert_eq!(estimate.used_usd, Some(1.0));
         assert_eq!(estimate.estimated_total_usd, Some(2.0));
         assert_eq!(estimate.sample_count, 1);
+    }
+
+    #[test]
+    fn quota_estimate_excludes_prior_login_direct_and_bridge_costs() {
+        let conn = database();
+        for (provider, at, cost) in [(1, NOW - 1, 10), (2, NOW - 1, 10), (1, NOW, 1), (2, NOW, 2)] {
+            insert(&conn, provider, at, Some(cost * 1_000_000_000_000_000));
+        }
+        conn.execute(
+            "UPDATE request_logs SET cost_source_provider_id = 1 WHERE final_provider_id = 2",
+            [],
+        )
+        .unwrap();
+        let current = OAuthQuotaWindow {
+            cost_start_at: Some(NOW),
+            ..window(80.0)
+        };
+        let estimate = estimate_window(&conn, 1, current, NOW).unwrap().unwrap();
+        assert_eq!(estimate.used_usd, Some(3.0));
+        assert_eq!(estimate.estimated_total_usd, Some(15.0));
+        assert_eq!(estimate.sample_count, 2);
+        assert_eq!(estimate.window_start, START);
+
+        let just_logged_in = OAuthQuotaWindow {
+            cost_start_at: Some(NOW + 1),
+            ..current
+        };
+        let empty = estimate_window(&conn, 1, just_logged_in, NOW)
+            .unwrap()
+            .unwrap();
+        assert_eq!(empty.sample_count, 0);
+        assert!(empty.estimated_total_usd.is_none());
+    }
+
+    #[test]
+    fn quota_estimate_queries_each_provider_through_an_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("quota-index.db")).unwrap();
+        let conn = db.open_connection().unwrap();
+        let plan: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {WINDOW_COST_SQL}"))
+            .unwrap()
+            .query_map(params![1, START, NOW], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|step| {
+                step.contains("SEARCH request_logs") && step.contains("final_provider_id=?")
+            }),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter().any(|step| {
+                step.contains("idx_request_logs_cost_source_created_at")
+                    && step.contains("cost_source_provider_id=?")
+            }),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|step| step.contains("SCAN request_logs")));
     }
 
     #[test]
@@ -264,6 +321,11 @@ mod tests {
     fn quota_estimate_includes_bridge_costs_using_recorded_source_identity_once() {
         let conn = database();
         insert(&conn, 1, NOW, Some(1_000_000_000_000_000));
+        conn.execute(
+            "UPDATE request_logs SET cost_source_provider_id = 1 WHERE final_provider_id = 1",
+            [],
+        )
+        .unwrap();
         for (bridge, source, recorded_bridge, amount) in
             [(2, 1, 2, 3), (3, 1, 3, 2), (4, 1, 99, 10), (5, 88, 5, 10)]
         {
@@ -274,8 +336,16 @@ mod tests {
             });
             let settings = serde_json::json!(["not JSON", null, 7, true, identity, identity]);
             conn.execute(
-                "UPDATE request_logs SET special_settings_json = ?1 WHERE final_provider_id = ?2",
-                params![settings.to_string(), bridge],
+                "UPDATE request_logs SET special_settings_json = ?1, cost_source_provider_id = ?3
+                 WHERE final_provider_id = ?2",
+                params![
+                    settings.to_string(),
+                    bridge,
+                    crate::request_logs::semantics::resolve_cx2cc_source_provider_id(
+                        Some(&settings.to_string()),
+                        Some(bridge),
+                    ),
+                ],
             )
             .unwrap();
         }

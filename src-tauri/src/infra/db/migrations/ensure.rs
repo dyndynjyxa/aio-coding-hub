@@ -23,6 +23,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_bridge_type(conn)?;
     drop_legacy_request_attempt_logs_table(conn)?;
     ensure_request_logs_extended_columns(conn)?;
+    ensure_request_logs_cost_source(conn)?;
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_provider_custom_headers(conn)?;
     ensure_provider_supports_websockets(conn)?;
@@ -525,6 +526,9 @@ fn ensure_provider_oauth_columns(conn: &mut Connection) -> Result<(), String> {
     if !existing.contains("oauth_last_refreshed_at") {
         ddl.push("ALTER TABLE providers ADD COLUMN oauth_last_refreshed_at INTEGER;");
     }
+    if !existing.contains("oauth_cost_start_at") {
+        ddl.push("ALTER TABLE providers ADD COLUMN oauth_cost_start_at INTEGER;");
+    }
     if !existing.contains("oauth_last_error") {
         ddl.push("ALTER TABLE providers ADD COLUMN oauth_last_error TEXT;");
     }
@@ -537,6 +541,14 @@ fn ensure_provider_oauth_columns(conn: &mut Connection) -> Result<(), String> {
     if !ddl.is_empty() {
         tx.execute_batch(ddl.join("\n").as_str())
             .map_err(|e| format!("failed to ensure providers oauth columns: {e}"))?;
+    }
+    if !existing.contains("oauth_cost_start_at") {
+        // Older logs cannot establish which login owned the credentials.
+        tx.execute(
+            "UPDATE providers SET oauth_cost_start_at = ?1 WHERE auth_mode = 'oauth'",
+            [now_unix_seconds().saturating_add(1)],
+        )
+        .map_err(|e| format!("failed to initialize OAuth cost boundaries: {e}"))?;
     }
 
     if existing.contains("auth_mode") || adding_auth_mode {
@@ -563,6 +575,60 @@ WHERE oauth_refresh_lead_s IS NULL OR oauth_refresh_lead_s <= 0;
 
     tx.commit()
         .map_err(|e| format!("failed to commit sqlite transaction: {e}"))?;
+    Ok(())
+}
+
+fn ensure_request_logs_cost_source(conn: &mut Connection) -> Result<(), String> {
+    if !column_exists(conn, "request_logs", "special_settings_json")? {
+        return Ok(());
+    }
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to start cost source migration: {e}"))?;
+    if !column_exists(&tx, "request_logs", "cost_source_provider_id")? {
+        tx.execute_batch("ALTER TABLE request_logs ADD COLUMN cost_source_provider_id INTEGER;")
+            .map_err(|e| format!("failed to add request log cost source: {e}"))?;
+        let mut select = tx
+            .prepare(
+                "SELECT id, final_provider_id, special_settings_json FROM request_logs
+                 WHERE special_settings_json IS NOT NULL",
+            )
+            .map_err(|e| format!("failed to prepare cost source backfill: {e}"))?;
+        let mut update = tx
+            .prepare("UPDATE request_logs SET cost_source_provider_id = ?1 WHERE id = ?2")
+            .map_err(|e| format!("failed to prepare cost source update: {e}"))?;
+        let rows = select
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| format!("failed to read cost source history: {e}"))?;
+        for row in rows {
+            let (id, final_provider_id, settings) =
+                row.map_err(|e| format!("failed to read cost source row: {e}"))?;
+            if let Some(source_id) =
+                crate::request_logs::semantics::resolve_cx2cc_source_provider_id(
+                    Some(&settings),
+                    final_provider_id,
+                )
+            {
+                update
+                    .execute(params![source_id, id])
+                    .map_err(|e| format!("failed to backfill cost source: {e}"))?;
+            }
+        }
+    }
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_cost_source_created_at
+         ON request_logs(cost_source_provider_id, created_at)
+         WHERE cost_source_provider_id IS NOT NULL;",
+    )
+    .map_err(|e| format!("failed to index request log cost sources: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("failed to commit cost source migration: {e}"))?;
     Ok(())
 }
 
