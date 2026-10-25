@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.60.25](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.24...aio-coding-hub-v0.60.25) (2026-10-25)
+
+
+### Bug Fixes
+
+* **codex:** handle response interruptions and client aborts ([6595502](https://github.com/dyndynjyxa/aio-coding-hub/commit/65955025cb42d9c0e3dfaa197cc55df0030952d0))
+* **oauth:** align quota estimates with sampled utilization ([3bfe116](https://github.com/dyndynjyxa/aio-coding-hub/commit/3bfe116e09c179aacd0c9ba893b7132f0d7ff536))
+* **oauth:** keep quota samples consistent across log lifecycle and token refresh ([6bcb04d](https://github.com/dyndynjyxa/aio-coding-hub/commit/6bcb04d3f09eb22ce75ead6e352ec9e1ca6b839d))
+
 ## [0.60.24](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.23...aio-coding-hub-v0.60.24) (2026-10-24)
 
 
