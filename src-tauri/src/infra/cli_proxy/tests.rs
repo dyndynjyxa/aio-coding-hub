@@ -278,7 +278,7 @@ fn codex_provider_with_mapping(source: &str) -> ProviderUpsertParams {
 }
 
 #[test]
-fn codex_websocket_settings_sync_rewrites_both_directions_and_missing_capability() {
+fn codex_websocket_settings_sync_rewrites_both_directions_and_removes_disabled_capability() {
     let mut test_app = CliProxyTestApp::new();
     test_app.install_fake_codex();
     let handle = test_app.handle();
@@ -296,8 +296,8 @@ fn codex_websocket_settings_sync_rewrites_both_directions_and_missing_capability
         let configured: toml::Value =
             toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert_eq!(
-            configured["model_providers"]["aio"]["supports_websockets"].as_bool(),
-            Some(value)
+            configured["model_providers"]["aio"].get("supports_websockets"),
+            value.then_some(&toml::Value::Boolean(true))
         );
         assert!(codex::is_proxy_config_applied(&handle, base_origin));
     }
@@ -305,19 +305,19 @@ fn codex_websocket_settings_sync_rewrites_both_directions_and_missing_capability
         .unwrap()
         .parse::<toml_edit::DocumentMut>()
         .unwrap();
-    old_config["model_providers"]["aio"]
-        .as_table_like_mut()
-        .unwrap()
-        .remove("supports_websockets");
-    old_config["model_providers"]["other"]["supports_websockets"] = toml_edit::value(false);
+    old_config["model_providers"]["aio"]["supports_websockets"] = toml_edit::value(false);
+    old_config["model_providers"]["other"]["supports_websockets"] = toml_edit::value(true);
     std::fs::write(&config_path, old_config.to_string()).unwrap();
     assert!(!codex::is_proxy_config_applied(&handle, base_origin));
     sync_enabled(&handle, base_origin, true).unwrap();
     let configured: toml::Value =
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert!(configured["model_providers"]["aio"]
+        .get("supports_websockets")
+        .is_none());
     assert_eq!(
-        configured["model_providers"]["aio"]["supports_websockets"].as_bool(),
-        Some(false)
+        configured["model_providers"]["other"]["supports_websockets"].as_bool(),
+        Some(true)
     );
     assert!(codex::is_proxy_config_applied(&handle, base_origin));
 }

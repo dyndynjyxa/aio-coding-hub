@@ -1261,7 +1261,7 @@ fn build_codex_config_toml_with_auth_strategy(
     set_codex_websocket_support(
         &out,
         provider_key,
-        Some(toml_edit::value(supports_websockets)),
+        supports_websockets.then(|| toml_edit::value(true)),
     )
     .map(String::into_bytes)
 }
@@ -1333,7 +1333,9 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
     }
 
     let expected_websockets = match crate::settings::read(app) {
-        Ok(settings) => settings.codex_responses_websocket_enabled,
+        Ok(settings) => settings
+            .codex_responses_websocket_enabled
+            .then_some(toml::Value::Boolean(true)),
         Err(_) => return false,
     };
     let parsed = match config.parse::<toml::Value>() {
@@ -1344,11 +1346,9 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
         .get("model_provider")
         .and_then(toml::Value::as_str)
         .and_then(|key| parsed.get("model_providers")?.get(key))
-        .and_then(|provider| provider.get("supports_websockets"))
-        .and_then(toml::Value::as_bool);
-    // Missing is not equivalent to false: explicitly persist the HTTP preference
-    // so a prior or client-default WebSocket setting cannot survive synchronization.
-    if current_websockets != Some(expected_websockets) {
+        .and_then(|provider| provider.get("supports_websockets"));
+    // Disabled WebSocket support is represented by an absent provider key.
+    if current_websockets != expected_websockets.as_ref() {
         return false;
     }
 
@@ -1563,10 +1563,9 @@ mod websocket_config_tests {
             .unwrap();
             let disabled_value: toml::Value =
                 toml::from_str(std::str::from_utf8(&disabled).unwrap()).unwrap();
-            assert_eq!(
-                disabled_value["model_providers"][provider_key]["supports_websockets"].as_bool(),
-                Some(false)
-            );
+            assert!(disabled_value["model_providers"][provider_key]
+                .get("supports_websockets")
+                .is_none());
             std::fs::write(&target, &disabled).unwrap();
             let enabled: toml::Value =
                 toml::from_str(std::str::from_utf8(&enabled).unwrap()).unwrap();

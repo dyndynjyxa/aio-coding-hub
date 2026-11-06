@@ -271,10 +271,9 @@ mod tests {
         assert!(result.warnings.is_empty(), "{:?}", result.warnings);
         let after: toml::Value =
             toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-        assert_eq!(
-            after["model_providers"]["aio"]["supports_websockets"].as_bool(),
-            Some(false)
-        );
+        assert!(after["model_providers"]["aio"]
+            .get("supports_websockets")
+            .is_none());
         assert_eq!(
             after["model_providers"]["aio"]["unknown"].as_str(),
             Some("keep")
