@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.26](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.25...aio-coding-hub-v0.60.26) (2026-11-06)
+
+
+### Bug Fixes
+
+* **codex:** remove websocket capability when disabled ([1fe6d6e](https://github.com/dyndynjyxa/aio-coding-hub/commit/1fe6d6e3177b45cf7d5b81db822cd83e04748179))
+
 ## [0.60.25](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.24...aio-coding-hub-v0.60.25) (2026-10-25)
 
 
