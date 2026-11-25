@@ -92,10 +92,25 @@ async fn needs_refresh(db: &crate::db::Db, provider_id: i64) -> Result<bool, Str
         move || -> crate::shared::error::AppResult<bool> {
             let conn = db.open_connection()?;
             let policy = domain::read_policy(&conn, provider_id)?;
-            if policy.oauth_min_remaining_percent.is_none() && !policy.oauth_use_credits {
-                return Ok(false);
-            }
             let snapshot = domain::read_snapshot(&conn, provider_id)?;
+            if policy.oauth_min_remaining_percent.is_none() && !policy.oauth_use_credits {
+                // Older snapshots could mark a spend cap as a hard limit even
+                // with subscription quota left. Recheck these after the normal
+                // freshness interval. A real 429 snapshot has zero remaining.
+                let needs_recheck = snapshot.as_ref().is_some_and(|s| {
+                    s.usage_limit_reached
+                        && [
+                            s.limit_5h_remaining_percent,
+                            s.limit_weekly_remaining_percent,
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .any(|remaining| remaining > 0.0)
+                });
+                if !needs_recheck {
+                    return Ok(false);
+                }
+            }
             Ok(snapshot
                 .is_none_or(|snapshot| !snapshot.is_fresh(crate::shared::time::now_unix_seconds())))
         }
@@ -648,9 +663,10 @@ pub(crate) fn should_retry_oauth_limits_after_refresh(err: &str) -> bool {
 
 fn parse_credits(body: &serde_json::Value) -> Option<ProviderOAuthCreditBalance> {
     let credits = body.get("credits")?.as_object()?;
+    let spending_allowed = !credit_spend_limit_reached(body);
     Some(ProviderOAuthCreditBalance {
-        has_credits: credits.get("has_credits")?.as_bool()?,
-        unlimited: credits.get("unlimited")?.as_bool()?,
+        has_credits: credits.get("has_credits")?.as_bool()? && spending_allowed,
+        unlimited: credits.get("unlimited")?.as_bool()? && spending_allowed,
         balance: credits
             .get("balance")
             .and_then(serde_json::Value::as_str)
@@ -658,10 +674,22 @@ fn parse_credits(body: &serde_json::Value) -> Option<ProviderOAuthCreditBalance>
     })
 }
 
-fn parse_usage_limit_reached(body: &serde_json::Value) -> bool {
+fn credit_spend_limit_reached(body: &serde_json::Value) -> bool {
     body.pointer("/spend_control/reached")
         .and_then(serde_json::Value::as_bool)
         == Some(true)
+}
+
+fn parse_usage_limit_reached(body: &serde_json::Value) -> bool {
+    let subscription_available = body
+        .pointer("/rate_limit/allowed")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+        && body
+            .pointer("/rate_limit/limit_reached")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false);
+    (credit_spend_limit_reached(body) && !subscription_available)
         || body
             .get("rate_limit_reached_type")
             .is_some_and(|value| !value.is_null())
@@ -1465,6 +1493,40 @@ mod tests {
         assert!(!parsed_codex(serde_json::json!({"spend_control":{"reached":false},"rate_limit_reached_type":null,"rate_limit_upsell":null})).usage_limit_reached);
     }
 
+    #[test]
+    fn capped_workspace_can_route_included_quota_without_using_credits() {
+        let mut usage = serde_json::json!({
+            "spend_control": {"reached": true},
+            "credits": {"has_credits": true, "unlimited": true, "balance": "100"},
+            "rate_limit": {
+                "allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 0}, "secondary_window": {"used_percent": 31}
+            }
+        });
+        let parsed = parsed_codex(usage.clone());
+        assert!(!parsed.usage_limit_reached);
+        assert_eq!(parsed.limit_5h_remaining_percent, Some(100.0));
+        assert_eq!(parsed.limit_weekly_remaining_percent, Some(69.0));
+        let credits = parsed.credits.unwrap();
+        assert!(!credits.has_credits && !credits.unlimited);
+        assert_eq!(credits.balance.as_deref(), Some("100"));
+
+        for rate_limit in [
+            serde_json::json!({"allowed": false, "limit_reached": true}),
+            serde_json::json!({"allowed": true, "limit_reached": true}),
+            serde_json::json!({"allowed": false, "limit_reached": false}),
+            serde_json::json!({"allowed": true}),
+            serde_json::Value::Null,
+        ] {
+            let mut limited = usage.clone();
+            limited["rate_limit"] = rate_limit;
+            assert!(parsed_codex(limited).usage_limit_reached);
+        }
+        usage["rate_limit_reached_type"] =
+            serde_json::json!({"type": "workspace_owner_usage_limit_reached"});
+        assert!(parsed_codex(usage).usage_limit_reached);
+    }
+
     fn quota_test_provider() -> (tempfile::TempDir, crate::db::Db, i64) {
         use std::sync::atomic::{AtomicI64, Ordering};
         static NEXT_ID: AtomicI64 = AtomicI64::new(91000);
@@ -1476,6 +1538,26 @@ mod tests {
             [provider_id],
         ).unwrap();
         (dir, db, provider_id)
+    }
+
+    #[tokio::test]
+    async fn refreshes_stale_hard_limit_with_remaining_quota_without_a_custom_policy() {
+        let (_dir, db, id) = quota_test_provider();
+        let update = |sql: &str| {
+            db.open_connection().unwrap().execute(sql, [id]).unwrap();
+        };
+        update("UPDATE providers SET oauth_use_credits = 0 WHERE id = ?1");
+        assert!(!needs_refresh(&db, id).await.unwrap());
+
+        domain::save_exhausted_snapshot(&db, id, None).unwrap();
+        update("UPDATE provider_oauth_limit_snapshots SET checked_at = 1 WHERE provider_id = ?1");
+        assert!(!needs_refresh(&db, id).await.unwrap());
+
+        update("UPDATE provider_oauth_limit_snapshots SET limit_5h_remaining_percent = 100, limit_weekly_remaining_percent = 69 WHERE provider_id = ?1");
+        assert!(needs_refresh(&db, id).await.unwrap());
+
+        update("UPDATE provider_oauth_limit_snapshots SET usage_limit_reached = 0 WHERE provider_id = ?1");
+        assert!(!needs_refresh(&db, id).await.unwrap());
     }
 
     #[tokio::test]
