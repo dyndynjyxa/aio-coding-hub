@@ -7,7 +7,10 @@
 use super::abort_guard::RequestAbortGuard;
 use super::logging::enqueue_request_log_placeholder;
 use super::request_context::RequestContext;
-use super::{is_claude_count_tokens_request, is_codex_model_discovery_request};
+use super::{
+    is_claude_count_tokens_request, is_codex_model_discovery_request,
+    is_gemini_model_list_fallback_request,
+};
 
 use crate::gateway::active_requests::ActiveRequestStart;
 use crate::gateway::events::{emit_gateway_debug_log_lazy, emit_request_start_event};
@@ -166,7 +169,8 @@ where
         is_codex_model_discovery_request(&cli_key, &method, &forwarded_path);
 
     let provider_health_neutral = is_codex_model_discovery
-        || super::gemini_catalog::is_request(&cli_key, &method, &forwarded_path);
+        || super::gemini_catalog::is_request(&cli_key, &method, &forwarded_path)
+        || is_gemini_model_list_fallback_request(&cli_key, &method, &forwarded_path);
 
     let (headers, body) = {
         let (parts, b) = req.into_parts();

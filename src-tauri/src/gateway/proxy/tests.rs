@@ -1,7 +1,7 @@
 use super::{
     build_claude_probe_response_body, compute_observe_request, is_claude_count_tokens_request,
-    is_codex_model_discovery_request, is_internal_forwarded_request, should_observe_request,
-    should_seed_in_progress_request_log,
+    is_codex_model_discovery_request, is_gemini_model_list_fallback_request,
+    is_internal_forwarded_request, should_observe_request, should_seed_in_progress_request_log,
 };
 use axum::http::{HeaderMap, Method};
 use serde_json::json;
@@ -44,6 +44,43 @@ fn claude_observation_matches_vendor_default_log_contract() {
         "codex",
         &Method::POST,
         "/v1/responses"
+    ));
+}
+
+#[test]
+fn gemini_model_list_fallback_requests_are_not_observed() {
+    for path in ["/v1/models", "/v1/models/", "/v1beta/models"] {
+        assert!(
+            !should_observe_request("gemini", &Method::GET, path),
+            "{path}"
+        );
+    }
+    assert!(is_gemini_model_list_fallback_request(
+        "gemini",
+        &Method::GET,
+        "/v1/models"
+    ));
+
+    // Generation calls and other CLIs' model lists are still recorded.
+    assert!(should_observe_request(
+        "gemini",
+        &Method::POST,
+        "/v1beta/models/gemini-2.5-flash:streamGenerateContent"
+    ));
+    assert!(should_observe_request(
+        "gemini",
+        &Method::POST,
+        "/v1/models"
+    ));
+    assert!(!is_gemini_model_list_fallback_request(
+        "gemini",
+        &Method::GET,
+        "/v1/models/gemini-2.5-flash"
+    ));
+    assert!(!is_gemini_model_list_fallback_request(
+        "grok",
+        &Method::GET,
+        "/v1/models"
     ));
 }
 

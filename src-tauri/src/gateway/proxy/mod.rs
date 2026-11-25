@@ -79,6 +79,7 @@ fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
 fn should_observe_request(cli_key: &str, method: &Method, forwarded_path: &str) -> bool {
     if is_codex_model_discovery_request(cli_key, method, forwarded_path)
         || gemini_catalog::is_request(cli_key, method, forwarded_path)
+        || is_gemini_model_list_fallback_request(cli_key, method, forwarded_path)
     {
         return false;
     }
@@ -93,6 +94,19 @@ fn is_codex_model_discovery_request(cli_key: &str, method: &Method, forwarded_pa
             forwarded_path.trim_end_matches('/'),
             "/v1/models" | "/models"
         )
+}
+
+/// agy retries model discovery on GET /v1/models when the GenAI catalog
+/// (/v1beta/models) fails. Like the catalog it is metadata, not a model call,
+/// and every agy start (e.g. `agy -p /usage`) sends it.
+pub(super) fn is_gemini_model_list_fallback_request(
+    cli_key: &str,
+    method: &Method,
+    forwarded_path: &str,
+) -> bool {
+    cli_key == "gemini"
+        && method == Method::GET
+        && forwarded_path.trim_end_matches('/') == "/v1/models"
 }
 
 fn is_claude_probe_request(
