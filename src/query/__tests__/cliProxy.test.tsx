@@ -267,6 +267,51 @@ describe("query/cliProxy", () => {
     expect(client.getQueryState(cliManagerKeys.grokConfig())?.isInvalidated).toBe(true);
   });
 
+  it("invalidates the Gemini model list only after changing the Gemini proxy", async () => {
+    setTauriRuntime();
+    vi.mocked(cliProxySetEnabled).mockResolvedValue({
+      trace_id: "t-gemini-models",
+      cli_key: "gemini",
+      enabled: false,
+      ok: true,
+      error_code: null,
+      message: "ok",
+      base_origin: null,
+    });
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.geminiModels(), [{ id: "m", label: "M" }]);
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useCliProxySetEnabledMutation(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ cliKey: "codex", enabled: false });
+    });
+    expect(client.getQueryState(cliManagerKeys.geminiModels())?.isInvalidated).toBe(false);
+
+    await act(async () => {
+      await result.current.mutateAsync({ cliKey: "gemini", enabled: false });
+    });
+    expect(client.getQueryState(cliManagerKeys.geminiModels())?.isInvalidated).toBe(true);
+  });
+
+  it("invalidates the Gemini model list even when the Gemini proxy change fails", async () => {
+    setTauriRuntime();
+    vi.mocked(cliProxySetEnabled).mockRejectedValue(new Error("boom"));
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.geminiModels(), [{ id: "m", label: "M" }]);
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useCliProxySetEnabledMutation(), { wrapper });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync({ cliKey: "gemini", enabled: true })).rejects.toThrow(
+        "boom"
+      );
+    });
+    expect(client.getQueryState(cliManagerKeys.geminiModels())?.isInvalidated).toBe(true);
+  });
+
   it("rolls back cache when setEnabled fails", async () => {
     setTauriRuntime();
 

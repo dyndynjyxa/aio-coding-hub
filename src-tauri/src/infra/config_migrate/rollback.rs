@@ -17,8 +17,7 @@ pub(super) struct CliRuntimeBackup {
     pub(super) cli_key: &'static str,
     pub(super) prompt_target: Option<Vec<u8>>,
     pub(super) prompt_manifest: Option<Vec<u8>>,
-    pub(super) mcp_target: Option<Vec<u8>>,
-    pub(super) mcp_manifest: Option<Vec<u8>>,
+    mcp: Option<crate::mcp::SingleCliBackup>,
 }
 
 #[derive(Debug)]
@@ -80,8 +79,7 @@ pub(super) fn capture_cli_runtime_backups<R: tauri::Runtime>(
             cli_key,
             prompt_target: crate::prompt_sync::read_target_bytes(app, cli_key)?,
             prompt_manifest: crate::prompt_sync::read_manifest_bytes(app, cli_key)?,
-            mcp_target: crate::mcp_sync::read_target_bytes(app, cli_key)?,
-            mcp_manifest: crate::mcp_sync::read_manifest_bytes(app, cli_key)?,
+            mcp: crate::mcp::SingleCliBackup::capture_for_shared(app, cli_key)?,
         });
     }
     Ok(backups)
@@ -102,15 +100,8 @@ fn restore_cli_runtime_backups<R: tauri::Runtime>(
         {
             tracing::warn!(cli_key = backup.cli_key, error = %err, "config import rollback: failed to restore prompt manifest");
         }
-        if let Err(err) =
-            crate::mcp_sync::restore_target_bytes(app, backup.cli_key, backup.mcp_target)
-        {
-            tracing::warn!(cli_key = backup.cli_key, error = %err, "config import rollback: failed to restore mcp target");
-        }
-        if let Err(err) =
-            crate::mcp_sync::restore_manifest_bytes(app, backup.cli_key, backup.mcp_manifest)
-        {
-            tracing::warn!(cli_key = backup.cli_key, error = %err, "config import rollback: failed to restore mcp manifest");
+        if let Some(mcp) = backup.mcp {
+            mcp.restore(app, backup.cli_key);
         }
     }
 }
@@ -118,12 +109,15 @@ fn restore_cli_runtime_backups<R: tauri::Runtime>(
 pub(super) fn sync_all_cli_runtime<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     conn: &Connection,
+    backups: &[CliRuntimeBackup],
 ) -> AppResult<()> {
-    for cli_key in
-        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Workspaces)
-    {
+    for backup in backups {
+        let cli_key = backup.cli_key;
         skip_desktop_not_initialized(cli_key, crate::prompts::sync_one_cli(app, conn, cli_key))?;
-        skip_desktop_not_initialized(cli_key, crate::mcp::sync_one_cli(app, conn, cli_key))?;
+        skip_desktop_not_initialized(
+            cli_key,
+            crate::mcp::SingleCliBackup::sync_shared(app, conn, cli_key, backup.mcp.as_ref()),
+        )?;
         skip_desktop_not_initialized(cli_key, crate::skills::sync_one_cli(app, conn, cli_key))?;
     }
     Ok(())
@@ -166,7 +160,7 @@ pub(super) fn rollback_after_failed_import<R: tauri::Runtime>(
 
     match db.open_connection() {
         Ok(conn) => {
-            if let Err(err) = sync_all_cli_runtime(app, &conn) {
+            if let Err(err) = sync_all_cli_runtime(app, &conn, &runtime_backups) {
                 tracing::warn!(error = %err, "config import rollback: failed to resync runtime from restored db state");
                 restore_cli_runtime_backups(app, runtime_backups);
             }

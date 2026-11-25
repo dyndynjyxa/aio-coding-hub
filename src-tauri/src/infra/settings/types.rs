@@ -77,7 +77,7 @@ impl Default for WslTargetCli {
         Self {
             claude: true,
             codex: true,
-            gemini: true,
+            gemini: false,
         }
     }
 }

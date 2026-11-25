@@ -64,6 +64,7 @@ type WslSettingsCardController = {
   commitCustomHostAddress: () => Promise<void>;
   commitHostAddressMode: (next: WslHostAddressMode) => Promise<void>;
   commitWslAutoConfig: (value: boolean) => Promise<void>;
+  commitWslGemini: (value: boolean) => Promise<void>;
   configureNow: () => Promise<void>;
   confirmSwitchListenMode: () => Promise<void>;
   refreshAll: () => Promise<void>;
@@ -372,6 +373,37 @@ function WslCodexSyncTarget({
             : "固定使用 Windows 当前用户目录"}
         ：<span className="ml-1 font-mono break-all">{codexHostConfigPath}</span>
         。这只影响 Windows 本机，不会覆盖 WSL 内的目标路径。
+      </div>
+    </div>
+  );
+}
+
+function WslGeminiTarget({
+  disabled,
+  enabled,
+  onCommit,
+}: {
+  disabled: boolean;
+  enabled: boolean;
+  onCommit: (value: boolean) => void;
+}) {
+  return (
+    <div className="mt-3">
+      <SettingsRow label="WSL 中的 Gemini（Antigravity CLI）">
+        <Switch
+          aria-label="WSL 中的 Gemini（Antigravity CLI）"
+          checked={enabled}
+          onCheckedChange={onCommit}
+          disabled={disabled}
+        />
+      </SettingsRow>
+      <div className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          {enabled
+            ? "已开启：配置 WSL 时，会把 Gemini 的网关配置（~/.gemini/config/config.json 中的 gateway 字段）以及 MCP、提示词和 Skills 同步到每个 distro 的 Antigravity CLI（agy）。修改前请退出 WSL 中正在运行的 agy，新开的会话才生效；开启期间无法用 Google 账号登录，关闭后恢复原有配置。还需在本机开启 Gemini 代理，网关才会接收这些请求。"
+            : "未开启：不会修改 WSL 内的 Antigravity 配置，也不同步 Gemini 的 MCP、提示词和 Skills。从旧版升级后需要在这里重新开启。"}
+        </span>
       </div>
     </div>
   );
@@ -742,6 +774,21 @@ function useWslSettingsCardController({
     }
   }
 
+  async function commitWslGemini(value: boolean) {
+    if (!available) return;
+    if (saving || settingsMutating) return;
+    try {
+      const updated = await settingsPatchMutation.mutateAsync({
+        wsl_target_cli: { ...settings.wsl_target_cli, gemini: value },
+      });
+      if (!updated) return;
+      toast("已保存");
+    } catch (err) {
+      logToConsole("error", "更新 WSL Gemini 同步设置失败", { error: String(err) });
+      toast("更新失败：请稍后重试");
+    }
+  }
+
   async function commitWslAutoConfig(value: boolean) {
     if (!available) return;
     if (saving || settingsMutating) return;
@@ -788,6 +835,7 @@ function useWslSettingsCardController({
     commitCustomHostAddress,
     commitHostAddressMode,
     commitWslAutoConfig,
+    commitWslGemini,
     configureNow,
     confirmSwitchListenMode,
     refreshAll,
@@ -831,6 +879,11 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
             codexHomeMode={controller.codexHomeMode}
             codexHostConfigPath={controller.codexHostConfigPath}
             codexWslSyncEnabled={controller.codexWslSyncEnabled}
+          />
+          <WslGeminiTarget
+            disabled={saving || controller.settingsMutating}
+            enabled={settings.wsl_target_cli?.gemini ?? false}
+            onCommit={(checked) => void controller.commitWslGemini(checked)}
           />
           <WslConfigureActions
             configuring={controller.configuring}

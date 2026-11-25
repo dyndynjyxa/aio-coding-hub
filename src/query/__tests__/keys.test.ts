@@ -172,6 +172,8 @@ describe("query/keys", () => {
       "0.0.0",
     ]);
     expect(cliManagerKeys.geminiInfo()).toEqual(["cliManager", "gemini", "info"]);
+    expect(cliManagerKeys.geminiConfig()).toEqual(["cliManager", "gemini", "config"]);
+    expect(cliManagerKeys.geminiModels()).toEqual(["cliManager", "gemini", "models"]);
     expect(cliManagerKeys.grokInfo()).toEqual(["cliManager", "grok", "info"]);
     expect(cliManagerKeys.grokConfig()).toEqual(["cliManager", "grok", "config"]);
   });

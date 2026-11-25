@@ -284,6 +284,24 @@ where
         upstream_sent: true,
     };
 
+    // For OAuth the only catalog is the user's explicit configuration. This
+    // point is after provider admission, credential resolution and plugin hooks.
+    if let (Some(policy), Some(_)) = (&prepared.gemini_catalog_policy, prepared.oauth_adapter) {
+        let body = gemini_catalog::configured_catalog(policy);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        timing.upstream_sent = false;
+        let response = crate::gateway::streams::UpstreamResponse::new(
+            StatusCode::OK,
+            headers,
+            futures_util::stream::once(async move { Ok(body) }),
+        );
+        return AttemptSendOutcome::StreamResponse(response, timing);
+    }
+
     if let Some(connection) = input
         .ws_connection
         .as_ref()

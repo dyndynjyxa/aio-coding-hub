@@ -462,7 +462,7 @@ describe("pages/mcp/components/McpServerDialog", () => {
     expect(screen.getByDisplayValue("bar")).toBeInTheDocument();
   });
 
-  it("fills fields from array JSON and infers http from url", async () => {
+  it.each(["url", "serverUrl"])("fills remote MCP fields from %s", async (urlField) => {
     mockUpsertMutation(createUpsertMutation());
     vi.mocked(mcpParseJson).mockResolvedValueOnce(makeMcpParseResult({ servers: [] }));
 
@@ -472,8 +472,13 @@ describe("pages/mcp/components/McpServerDialog", () => {
 
     fireEvent.change(screen.getByPlaceholderText(/示例：\{"type":"stdio"/), {
       target: {
-        value:
-          '[{"name":"ArrHttp","url":"https://example.com/mcp","headers":{"Authorization":"Bearer x"}}]',
+        value: JSON.stringify([
+          {
+            name: "ArrHttp",
+            [urlField]: "https://example.com/mcp",
+            headers: { Authorization: "Bearer x" },
+          },
+        ]),
       },
     });
     fireEvent.click(screen.getByRole("button", { name: "从 JSON 填充" }));

@@ -116,7 +116,7 @@ describe("services/settings/settings", () => {
     expect(input).toMatchObject({
       preferredPort: 37123,
       gatewayListenMode: "localhost",
-      wslTargetCli: { claude: true, codex: true, gemini: true },
+      wslTargetCli: { claude: true, codex: true, gemini: false },
       codexOauthCompatibleProxyMode: true,
       codexResponsesWebsocketEnabled: true,
       cx2CcFallbackModelMain: "gpt-5.4",

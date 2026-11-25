@@ -1,5 +1,6 @@
 //! Usage: Manage local CLI proxy configuration files (infra adapter).
 
+pub(crate) mod agy_gateway;
 mod claude;
 mod claude_desktop;
 pub use claude_desktop::ClaudeDesktopConfigStatus;
@@ -11,6 +12,7 @@ pub(crate) use claude_desktop::{
 mod codex;
 mod gemini;
 mod grok;
+pub(crate) mod legacy_gemini_env;
 
 use crate::app_paths;
 use crate::shared::fs::{
@@ -384,9 +386,9 @@ fn target_files<R: tauri::Runtime>(
             Ok(files)
         }
         "gemini" => Ok(vec![TargetFile {
-            kind: "gemini_env",
-            path: gemini::gemini_env_path(app)?,
-            backup_name: ".env",
+            kind: gemini::KIND,
+            path: gemini::path(app)?,
+            backup_name: "antigravity-config.json",
             max_bytes: CLI_PROXY_FILE_MAX_BYTES,
         }]),
         "grok" => Ok(vec![TargetFile {
@@ -410,13 +412,25 @@ fn is_proxy_config_applied<R: tauri::Runtime>(
         "claude" => claude::is_proxy_config_applied(app, base_origin),
         "claude_desktop" => claude_desktop::is_applied(app, base_origin),
         "codex" => codex::is_proxy_config_applied(app, base_origin),
-        "gemini" => gemini::is_proxy_config_applied(app, base_origin),
+        "gemini" => gemini::ready(app, base_origin),
         "grok" => grok::is_proxy_config_applied(app, base_origin),
         _ => false,
     }
 }
 
 // -- Dispatch: apply_proxy_config -------------------------------------------
+
+fn apply_to_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    manifest: &mut CliProxyManifest,
+    origin: &str,
+) -> crate::shared::error::AppResult<()> {
+    if manifest.cli_key == "gemini" {
+        gemini::apply(app, manifest, origin)
+    } else {
+        apply_proxy_config(app, &manifest.cli_key, origin)
+    }
+}
 
 fn apply_proxy_config<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -465,7 +479,6 @@ fn apply_proxy_config<R: tauri::Runtime>(
                 claude_desktop::build_target(t.kind, current, base_origin, &desktop_models)?
             }
             "codex" => unreachable!("Codex has a dedicated atomic apply path"),
-            "gemini" => gemini::build_gemini_env(current, &format!("{base_origin}/gemini"))?,
             "grok" => {
                 grok::apply_proxy_config(app, base_origin)?;
                 continue;
@@ -568,6 +581,9 @@ fn restore_from_manifest<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     let cli_key = manifest.cli_key.as_str();
     validate_cli_key(cli_key)?;
+    if cli_key == "gemini" {
+        return gemini::restore_if_owned(app, manifest).map(|_| ());
+    }
     let _codex_transaction = if cli_key == "codex" {
         Some(codex::transaction_lock()?)
     } else {
@@ -635,10 +651,6 @@ fn restore_from_manifest<R: tauri::Runtime>(
                     )?;
                     continue;
                 }
-                "gemini_env" => {
-                    gemini::merge_restore_gemini_env(&target_path, &backup_path)?;
-                    continue;
-                }
                 _ => {}
             }
 
@@ -669,20 +681,20 @@ fn restore_from_manifest<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The caller holds the Desktop transaction lock. A complete apply only needs
+/// The caller holds the client transaction lock. A complete apply only needs
 /// its enabled state committed; a partial one returns to the saved direct state.
-fn recover_desktop_pending_apply<R: tauri::Runtime>(
+fn recover_pending_apply<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     manifest: &mut CliProxyManifest,
 ) -> crate::shared::error::AppResult<bool> {
-    if manifest.cli_key != "claude_desktop" {
+    if !matches!(manifest.cli_key.as_str(), "claude_desktop" | "gemini") {
         return Ok(false);
     }
     let Some(base_origin) = manifest.pending_apply.clone() else {
         return Ok(false);
     };
     if !manifest_target_paths_changed(app, manifest)?
-        && is_proxy_config_applied(app, "claude_desktop", &base_origin)
+        && is_proxy_config_applied(app, &manifest.cli_key, &base_origin)
     {
         manifest.enabled = true;
         manifest.base_origin = Some(base_origin);
@@ -692,7 +704,7 @@ fn recover_desktop_pending_apply<R: tauri::Runtime>(
     }
     manifest.pending_apply = None;
     manifest.updated_at = now_unix_seconds();
-    write_manifest(app, "claude_desktop", manifest)?;
+    write_manifest(app, &manifest.cli_key, manifest)?;
     Ok(true)
 }
 
@@ -779,7 +791,12 @@ fn backup_for_enable<R: tauri::Runtime>(
 
     let mut entries = Vec::with_capacity(targets.len());
     for t in targets {
-        let read_bytes = read_optional_cli_proxy_file_with_max_len(&t.path, t.max_bytes)?;
+        let read_bytes = if cli_key == "gemini" {
+            // Antigravity can save concurrently. Its apply snapshots the same bytes it edits.
+            None
+        } else {
+            read_optional_cli_proxy_file_with_max_len(&t.path, t.max_bytes)?
+        };
         let existed = read_bytes.is_some();
         let backup_rel = if let Some(bytes) = read_bytes {
             let backup_path = files_dir.join(t.backup_name);
@@ -1213,6 +1230,9 @@ pub fn set_enabled<R: tauri::Runtime>(
     if !base_origin.starts_with("http://") && !base_origin.starts_with("https://") {
         return Err("SEC_INVALID_INPUT: base_origin must start with http:// or https://".into());
     }
+    let _agy_transaction = (cli_key == "gemini")
+        .then(gemini::transaction_lock)
+        .transpose()?;
     let _grok_transaction = if cli_key == "grok" {
         Some(grok::transaction_lock()?)
     } else {
@@ -1227,11 +1247,14 @@ pub fn set_enabled<R: tauri::Runtime>(
     let trace_id = new_trace_id("cli-proxy");
     let mut existing = read_manifest(app, cli_key)?;
     if let Some(manifest) = existing.as_mut() {
-        recover_desktop_pending_apply(app, manifest)?;
+        if gemini::legacy(manifest) {
+            gemini::retire_legacy(app, manifest)?;
+        }
+        recover_pending_apply(app, manifest)?;
     }
 
     if enabled
-        && cli_key == "claude_desktop"
+        && matches!(cli_key, "claude_desktop" | "gemini")
         && existing.as_ref().is_some_and(|manifest| manifest.enabled)
         && manifest_target_paths_changed(app, existing.as_ref().expect("checked above"))?
     {
@@ -1240,13 +1263,21 @@ pub fn set_enabled<R: tauri::Runtime>(
             cli_key,
             true,
             "CLI_PROXY_TARGET_CHANGED",
-            "Claude Desktop 配置目录已变化；请先关闭代理以恢复旧目录，再重新开启".to_string(),
+            "配置目录已变化；请先关闭代理以恢复旧目录，再重新开启".to_string(),
             existing.and_then(|manifest| manifest.base_origin),
         ));
     }
 
     if enabled {
-        let should_backup = existing.as_ref().map(|m| !m.enabled).unwrap_or(true);
+        // A previous Gemini snapshot also records when the direct config was absent.
+        // Reuse it only for the same home; apply refreshes it if the live gateway is user-owned.
+        let should_backup = match existing.as_ref() {
+            Some(m) if m.enabled => false,
+            Some(m) if cli_key == "gemini" && m.files.iter().any(|f| f.kind == gemini::KIND) => {
+                manifest_target_paths_changed(app, m)?
+            }
+            _ => true,
+        };
         let origin = Some(base_origin.to_string());
         let mut manifest = match if should_backup {
             backup_for_enable(app, cli_key, base_origin, existing.clone())
@@ -1269,9 +1300,12 @@ pub fn set_enabled<R: tauri::Runtime>(
         // Persist snapshot before applying changes to ensure we can restore on failure.
         if should_backup {
             manifest.enabled = false;
-            manifest.base_origin = Some(base_origin.to_string());
+            manifest.base_origin = (cli_key != "gemini").then(|| base_origin.to_string());
             manifest.updated_at = now_unix_seconds();
-            if let Err(err) = write_manifest(app, cli_key, &manifest) {
+            if let Err(err) = (cli_key != "gemini")
+                .then(|| write_manifest(app, cli_key, &manifest))
+                .transpose()
+            {
                 return Ok(CliProxyResult::failure(
                     trace_id,
                     cli_key,
@@ -1295,7 +1329,7 @@ pub fn set_enabled<R: tauri::Runtime>(
             write_manifest(app, cli_key, &manifest)?;
         }
 
-        return match apply_proxy_config(app, cli_key, base_origin) {
+        return match apply_to_manifest(app, &mut manifest, base_origin) {
             Ok(()) => {
                 manifest.enabled = true;
                 manifest.base_origin = Some(base_origin.to_string());
@@ -1330,7 +1364,7 @@ pub fn set_enabled<R: tauri::Runtime>(
                 // failure where the file was never modified). On parse failure
                 // the invalid file is already preserved as .invalid-backup by
                 // apply_proxy_config, so restoring would clobber user changes.
-                if should_backup && !is_parse_error {
+                if cli_key != "gemini" && should_backup && !is_parse_error {
                     let restored = restore_from_manifest(app, &manifest);
                     if cli_key == "claude_desktop" {
                         if let Err(restore_error) = restored {
@@ -1353,7 +1387,7 @@ pub fn set_enabled<R: tauri::Runtime>(
                 Ok(CliProxyResult::failure(
                     trace_id,
                     cli_key,
-                    false,
+                    cli_key == "gemini" && manifest.enabled,
                     "CLI_PROXY_ENABLE_FAILED",
                     err.to_string(),
                     origin,
@@ -1377,7 +1411,7 @@ pub fn set_enabled<R: tauri::Runtime>(
         Ok(()) => {
             manifest.enabled = false;
             manifest.updated_at = now_unix_seconds();
-            let _ = write_manifest(app, cli_key, &manifest);
+            write_manifest(app, cli_key, &manifest)?;
 
             Ok(CliProxyResult::success(
                 trace_id,
@@ -1418,17 +1452,30 @@ fn for_each_manifest<R: tauri::Runtime>(
         let mut enabled = false;
         let mut base_origin = None;
         let result = (|| {
+            let _agy_transaction = (cli_key == "gemini")
+                .then(gemini::transaction_lock)
+                .transpose()?;
             let _desktop_transaction = if cli_key == "claude_desktop" {
                 Some(claude_desktop::transaction_lock()?)
             } else {
                 None
             };
             read_manifest(app, cli_key).and_then(|manifest| {
-                let Some(manifest) = manifest else {
+                let Some(mut manifest) = manifest else {
                     return Ok(None);
                 };
                 enabled = manifest.enabled;
                 base_origin = manifest.base_origin.clone();
+                if gemini::legacy(&manifest) {
+                    gemini::retire_legacy(app, &mut manifest)?;
+                    return Ok(Some(CliProxyResult::success(
+                        trace_id.clone(),
+                        cli_key,
+                        false,
+                        "已恢复旧 Gemini CLI 配置，使用 Antigravity 需重新开启代理".into(),
+                        None,
+                    )));
+                }
                 run(cli_key, manifest, trace_id.clone())
             })
         })();
@@ -1456,11 +1503,11 @@ pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
         "cli-proxy-startup-repair",
         "CLI_PROXY_STARTUP_REPAIR_FAILED",
         |cli_key, mut manifest, trace_id| {
-            if recover_desktop_pending_apply(app, &mut manifest)? {
+            if recover_pending_apply(app, &mut manifest)? {
                 let message = if manifest.enabled {
-                    "启动自愈：已完成中断的 Claude Desktop 接管"
+                    "已完成中断的代理配置"
                 } else {
-                    "启动自愈：已回滚未完成的 Claude Desktop 接管"
+                    "已撤销未完成的代理配置"
                 };
                 return Ok(Some(CliProxyResult::success(
                     trace_id,
@@ -1476,6 +1523,20 @@ pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
             let Some(base_origin) = manifest.base_origin.clone() else {
                 return Ok(None);
             };
+            if cli_key == "gemini" {
+                // A running Antigravity can save its cached gateway again after explicit disable.
+                // All our interrupted enables have pending_apply set before touching config.json.
+                if !gemini::restore_if_owned(app, &manifest)? {
+                    return Ok(None);
+                }
+                return Ok(Some(CliProxyResult::success(
+                    trace_id,
+                    cli_key,
+                    false,
+                    "已恢复关闭代理后被 Antigravity 再次写入的网关配置".into(),
+                    None,
+                )));
+            }
             if !is_proxy_config_applied(app, cli_key, &base_origin) {
                 return Ok(None);
             }
@@ -1506,18 +1567,19 @@ pub fn sync_enabled<R: tauri::Runtime>(
         "cli-proxy-sync",
         "CLI_PROXY_SYNC_FAILED",
         |cli_key, mut manifest, trace_id| {
-            recover_desktop_pending_apply(app, &mut manifest)?;
+            recover_pending_apply(app, &mut manifest)?;
             if !manifest.enabled {
                 return Ok(None);
             }
-            if cli_key == "claude_desktop" && manifest_target_paths_changed(app, &manifest)? {
+            if matches!(cli_key, "claude_desktop" | "gemini")
+                && manifest_target_paths_changed(app, &manifest)?
+            {
                 return Ok(Some(CliProxyResult::failure(
                     trace_id,
                     cli_key,
                     true,
                     "CLI_PROXY_TARGET_CHANGED",
-                    "Claude Desktop 配置目录已变化；请先关闭代理以恢复旧目录，再重新开启"
-                        .to_string(),
+                    "配置目录已变化；请先关闭代理以恢复旧目录，再重新开启".to_string(),
                     manifest.base_origin.clone(),
                 )));
             }
@@ -1564,7 +1626,11 @@ pub fn sync_enabled<R: tauri::Runtime>(
                     }
                 };
             if !apply_live {
-                if manifest_targets_added || manifest.base_origin.as_deref() != Some(base_origin) {
+                // Gemini needs the last applied origin to recognize its file during disable or rebind.
+                if cli_key != "gemini"
+                    && (manifest_targets_added
+                        || manifest.base_origin.as_deref() != Some(base_origin))
+                {
                     if cli_key == "claude_desktop" {
                         claude_desktop::bump_config_generation_unlocked();
                     }
@@ -1611,7 +1677,7 @@ pub fn sync_enabled<R: tauri::Runtime>(
             if cli_key == "claude_desktop" {
                 write_manifest(app, cli_key, &manifest)?;
             }
-            apply_proxy_config(app, cli_key, base_origin)?;
+            apply_to_manifest(app, &mut manifest, base_origin)?;
             manifest.base_origin = Some(base_origin.to_string());
             manifest.pending_apply = None;
             manifest.updated_at = now_unix_seconds();
@@ -1643,7 +1709,7 @@ pub fn restore_enabled_keep_state<R: tauri::Runtime>(
         "cli-proxy-restore",
         "CLI_PROXY_RESTORE_FAILED",
         |cli_key, mut manifest, trace_id| {
-            recover_desktop_pending_apply(app, &mut manifest)?;
+            recover_pending_apply(app, &mut manifest)?;
             if !manifest.enabled {
                 return Ok(None);
             }
@@ -1673,8 +1739,6 @@ use codex::{
     codex_auth_path, codex_config_path, merge_restore_codex_auth_json,
     merge_restore_codex_config_toml, CodexConfigPlatform,
 };
-#[cfg(test)]
-use gemini::merge_restore_gemini_env;
 
 #[cfg(test)]
 mod tests;

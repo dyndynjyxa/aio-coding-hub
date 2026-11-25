@@ -126,6 +126,30 @@ fn make_test_bundle(schema_version: u32) -> ConfigBundle {
     }
 }
 
+#[test]
+fn config_import_preserves_destination_wsl_gateway_consent() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    for (local, imported, expected) in [
+        (false, true, false),
+        (true, true, true),
+        (true, false, false),
+    ] {
+        let mut settings = settings::read(&app).expect("local settings");
+        settings.wsl_target_cli.gemini = local;
+        settings::write(&app, &settings).expect("local choice");
+        let mut bundle = config_export(&app, &test_app.db).expect("export");
+        settings.schema_version = 38;
+        settings.wsl_target_cli.gemini = imported;
+        bundle.settings = serde_json::to_string(&settings).expect("legacy settings");
+        config_import(&app, &test_app.db, bundle).expect("import");
+        assert_eq!(
+            settings::read(&app).unwrap().wsl_target_cli.gemini,
+            expected
+        );
+    }
+}
+
 fn insert_image_gen_config(conn: &Connection, adapter_id: &str, api_key: &str) {
     conn.execute(
         r#"
@@ -249,6 +273,59 @@ fn config_import_keeps_desktop_rows_before_desktop_first_launch() {
         )
         .expect("Desktop prompt row kept");
     assert_eq!(content, "desktop prompt");
+}
+
+#[test]
+fn antigravity_unreadable_mcp_target_does_not_block_config_archive_import() {
+    let mut test = ConfigMigrateTestApp::new();
+    let home = test.home.path().to_owned();
+    test._env.set_var("AIO_CODING_HUB_TEST_HOME", &home);
+    test._env.set_var("CODEX_HOME", home.join(".codex"));
+    test._env.set_var("GROK_HOME", home.join(".grok"));
+    test._env
+        .set_var("CLAUDE_USER_DATA_DIR", home.join("desktop"));
+    let app = test.handle();
+    let target = home.join(".gemini/config/mcp_config.json");
+    std::fs::create_dir_all(&target).unwrap();
+    let mut bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
+    bundle.workspaces.push(WorkspaceExport {
+        cli_key: "gemini".into(),
+        name: "Imported".into(),
+        is_active: true,
+        prompts: vec![],
+        prompt: None,
+    });
+    bundle.mcp_servers.push(McpServerExport {
+        server_key: "from-archive".into(),
+        name: "from-archive".into(),
+        transport: "stdio".into(),
+        command: Some("example".into()),
+        args_json: "[]".into(),
+        env_json: "{}".into(),
+        cwd: None,
+        url: None,
+        headers_json: None,
+        enabled_in_workspaces: vec![
+            ("codex".into(), "Imported".into()),
+            ("gemini".into(), "Imported".into()),
+        ],
+    });
+
+    config_import(&app, &test.db, bundle).unwrap();
+    assert!(target.is_dir());
+    let codex = crate::codex_paths::codex_config_toml_path(&app).unwrap();
+    let config: toml::Value = std::fs::read_to_string(codex).unwrap().parse().unwrap();
+    assert_eq!(
+        config["mcp_servers"]["from-archive"]["command"].as_str(),
+        Some("example")
+    );
+    let conn = test.db.open_connection().unwrap();
+    let (id, _) = query_workspace(&conn, "gemini");
+    drop(conn);
+    assert!(crate::mcp::list_for_workspace(&test.db, id)
+        .unwrap()
+        .into_iter()
+        .any(|s| s.server_key == "from-archive" && s.enabled));
 }
 
 #[cfg(unix)]

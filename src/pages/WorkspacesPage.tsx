@@ -475,7 +475,7 @@ function WorkspaceDetailCard({ model }: { model: WorkspacesModel }) {
                 非当前工作区：启用/停用仅写入数据库，不会同步到 CLI。
               </Notice>
             )}
-            <McpServersView workspaceId={selectedWorkspace.id} />
+            <McpServersView workspaceId={selectedWorkspace.id} cliKey={selectedWorkspace.cli_key} />
           </>
         ) : (
           <SkillsView

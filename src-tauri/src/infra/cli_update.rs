@@ -1,4 +1,4 @@
-//! Usage: Check installed CLI versions against npm and run CLI updates.
+//! Usage: Check installed CLI versions against their release source and run CLI updates.
 
 use crate::shared::http_body::read_text_with_limit;
 use serde::Serialize;
@@ -14,12 +14,14 @@ const NPM_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
 const NPM_INSTALL_OUTPUT_STREAM_LIMIT: usize = 32 * 1024;
 const NPM_INSTALL_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
 const NPM_LATEST_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
+const AGY_RELEASE_REPO: &str = "google-antigravity/antigravity-cli";
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CliVersionCheck {
     pub cli_key: String,
-    pub npm_package: String,
+    /// npm package, or the GitHub repo whose releases a self-updating CLI follows.
+    pub package_name: String,
     pub installed_version: Option<String>,
     pub latest_version: Option<String>,
     pub update_available: bool,
@@ -101,11 +103,53 @@ fn is_update_available(installed_version: Option<&str>, latest_version: &str) ->
         .unwrap_or(false)
 }
 
-fn npm_package_for_cli_key(cli_key: &str) -> Option<&'static str> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateChannel {
+    /// Installed and updated with `npm install -g <package>@latest`.
+    Npm { package: &'static str },
+    /// Ships its own updater (`<command> update`); latest version comes from
+    /// the repo's GitHub releases.
+    SelfUpdate {
+        command: &'static str,
+        release_repo: &'static str,
+    },
+}
+
+impl UpdateChannel {
+    fn package_name(self) -> &'static str {
+        match self {
+            Self::Npm { package } => package,
+            Self::SelfUpdate { release_repo, .. } => release_repo,
+        }
+    }
+
+    fn executable(self, cli_key: &str) -> &str {
+        match self {
+            Self::Npm { .. } => cli_key,
+            Self::SelfUpdate { command, .. } => command,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Npm { .. } => "npm",
+            Self::SelfUpdate { command, .. } => command,
+        }
+    }
+}
+
+fn update_channel_for_cli_key(cli_key: &str) -> Option<UpdateChannel> {
     match cli_key.trim().to_ascii_lowercase().as_str() {
-        "claude" => Some("@anthropic-ai/claude-code"),
-        "codex" => Some("@openai/codex"),
-        "gemini" => Some("@google/gemini-cli"),
+        "claude" => Some(UpdateChannel::Npm {
+            package: "@anthropic-ai/claude-code",
+        }),
+        "codex" => Some(UpdateChannel::Npm {
+            package: "@openai/codex",
+        }),
+        "gemini" => Some(UpdateChannel::SelfUpdate {
+            command: crate::cli_manager::AGY_COMMAND,
+            release_repo: AGY_RELEASE_REPO,
+        }),
         _ => None,
     }
 }
@@ -114,46 +158,66 @@ fn unsupported_cli_key_error(cli_key: &str) -> String {
     format!("unsupported cli_key: {cli_key}")
 }
 
-async fn fetch_latest_version(npm_package: &str) -> Result<String, String> {
-    let url = format!("https://registry.npmjs.org/{npm_package}/latest");
+/// Reads a version string field from a registry JSON body; a leading `v` is dropped.
+fn version_from_json(body: &str, field: &str, source: &str) -> Result<String, String> {
+    let payload: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| format!("failed to parse {source} response: {e}"))?;
+    payload
+        .get(field)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().trim_start_matches(['v', 'V']))
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("{source} response missing {field}"))
+}
+
+async fn fetch_json_text(url: &str, source: &str) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(NPM_LATEST_TIMEOUT)
+        // GitHub's API rejects requests without a User-Agent.
+        .user_agent(concat!("aio-coding-hub/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|e| format!("failed to build npm registry client: {e}"))?;
+        .map_err(|e| format!("failed to build {source} client: {e}"))?;
 
     let response = client
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("failed to fetch latest npm version: {e}"))?;
+        .map_err(|e| format!("failed to fetch latest version from {source}: {e}"))?;
     let response = response
         .error_for_status()
-        .map_err(|e| format!("npm registry returned error: {e}"))?;
+        .map_err(|e| format!("{source} returned error: {e}"))?;
 
-    let body = read_text_with_limit(
+    read_text_with_limit(
         response,
         NPM_LATEST_RESPONSE_BODY_LIMIT,
-        "npm registry response",
+        &format!("{source} response"),
     )
     .await
-    .map_err(|e| format!("failed to read npm registry response: {e}"))?;
-    let payload: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("failed to parse npm registry response: {e}"))?;
-    payload
-        .get("version")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| "npm registry response missing version".to_string())
+    .map_err(|e| format!("failed to read {source} response: {e}"))
+}
+
+async fn fetch_latest_version(channel: UpdateChannel) -> Result<String, String> {
+    match channel {
+        UpdateChannel::Npm { package } => {
+            let source = "npm registry";
+            let url = format!("https://registry.npmjs.org/{package}/latest");
+            version_from_json(&fetch_json_text(&url, source).await?, "version", source)
+        }
+        UpdateChannel::SelfUpdate { release_repo, .. } => {
+            let source = "GitHub releases";
+            let url = format!("https://api.github.com/repos/{release_repo}/releases/latest");
+            version_from_json(&fetch_json_text(&url, source).await?, "tag_name", source)
+        }
+    }
 }
 
 pub async fn cli_check_latest_version(app: &tauri::AppHandle, cli_key: String) -> CliVersionCheck {
     let normalized_cli_key = cli_key.trim().to_ascii_lowercase();
-    let Some(npm_package) = npm_package_for_cli_key(&normalized_cli_key) else {
+    let Some(channel) = update_channel_for_cli_key(&normalized_cli_key) else {
         return CliVersionCheck {
             cli_key: normalized_cli_key.clone(),
-            npm_package: String::new(),
+            package_name: String::new(),
             installed_version: None,
             latest_version: None,
             update_available: false,
@@ -161,7 +225,8 @@ pub async fn cli_check_latest_version(app: &tauri::AppHandle, cli_key: String) -
         };
     };
 
-    let installed = crate::cli_manager::simple_cli_info_get(app, &normalized_cli_key);
+    let installed =
+        crate::cli_manager::simple_cli_info_get(app, channel.executable(&normalized_cli_key));
     let installed_version = installed
         .as_ref()
         .ok()
@@ -173,14 +238,14 @@ pub async fn cli_check_latest_version(app: &tauri::AppHandle, cli_key: String) -
         Err(error) => Some(format!("failed to probe installed version: {error}")),
     };
 
-    match fetch_latest_version(npm_package).await {
+    match fetch_latest_version(channel).await {
         Ok(latest_version) => {
             let update_available =
                 is_update_available(installed_version.as_deref(), &latest_version);
 
             CliVersionCheck {
                 cli_key: normalized_cli_key,
-                npm_package: npm_package.to_string(),
+                package_name: channel.package_name().to_string(),
                 installed_version,
                 latest_version: Some(latest_version),
                 update_available,
@@ -189,7 +254,7 @@ pub async fn cli_check_latest_version(app: &tauri::AppHandle, cli_key: String) -
         }
         Err(error) => CliVersionCheck {
             cli_key: normalized_cli_key,
-            npm_package: npm_package.to_string(),
+            package_name: channel.package_name().to_string(),
             installed_version,
             latest_version: None,
             update_available: false,
@@ -330,11 +395,33 @@ fn prepend_command_path(command: &mut Command, dir: &Path) {
     }
 }
 
+fn build_self_update_command(app: &tauri::AppHandle, command: &str) -> Result<Command, String> {
+    let info = crate::cli_manager::simple_cli_info_get(app, command)
+        .map_err(|e| format!("failed to resolve {command} executable: {e}"))?;
+    let exe = info
+        .executable_path
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("failed to locate {command} executable"))?;
+
+    let mut cmd = Command::new(&exe);
+    cmd.arg("update");
+    if let Some(parent) = exe.parent() {
+        prepend_command_path(&mut cmd, parent);
+    }
+    Ok(cmd)
+}
+
 fn build_cli_update_command(
     app: &tauri::AppHandle,
     cli_key: &str,
-    npm_package: &str,
+    channel: UpdateChannel,
 ) -> Result<Command, String> {
+    let npm_package = match channel {
+        UpdateChannel::Npm { package } => package,
+        UpdateChannel::SelfUpdate { command, .. } => {
+            return build_self_update_command(app, command);
+        }
+    };
     let npm_path = resolve_npm_executable(app, cli_key)?;
     let package_spec = format!("{npm_package}@latest");
 
@@ -372,9 +459,9 @@ async fn collect_output_task(
 
     match task.await {
         Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(format!("failed to read npm update {stream_name}: {error}")),
+        Ok(Err(error)) => Err(format!("failed to read update {stream_name}: {error}")),
         Err(error) => Err(format!(
-            "failed to join npm update {stream_name} reader: {error}"
+            "failed to join update {stream_name} reader: {error}"
         )),
     }
 }
@@ -390,7 +477,7 @@ async fn collect_update_output(
 
 pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateResult {
     let normalized_cli_key = cli_key.trim().to_ascii_lowercase();
-    let Some(npm_package) = npm_package_for_cli_key(&normalized_cli_key) else {
+    let Some(channel) = update_channel_for_cli_key(&normalized_cli_key) else {
         return CliUpdateResult {
             cli_key: normalized_cli_key.clone(),
             success: false,
@@ -399,7 +486,8 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
         };
     };
 
-    let mut command = match build_cli_update_command(app, &normalized_cli_key, npm_package) {
+    let label = channel.label();
+    let mut command = match build_cli_update_command(app, &normalized_cli_key, channel) {
         Ok(command) => command,
         Err(error) => {
             return CliUpdateResult {
@@ -429,7 +517,7 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
                 cli_key: normalized_cli_key,
                 success: false,
                 output: String::new(),
-                error: Some(format!("failed to start npm update: {error}")),
+                error: Some(format!("failed to start {label} update: {error}")),
             }
         }
     };
@@ -472,7 +560,7 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
                     success: false,
                     output: combined_output,
                     error: Some(format!(
-                        "npm update failed with exit code {:?}",
+                        "{label} update failed with exit code {:?}",
                         status.code()
                     )),
                 }
@@ -484,7 +572,7 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
                 cli_key: normalized_cli_key,
                 success: false,
                 output: String::new(),
-                error: Some(format!("failed while waiting for npm update: {error}")),
+                error: Some(format!("failed while waiting for {label} update: {error}")),
             }
         }
         Err(_) => {
@@ -495,7 +583,7 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
                 success: false,
                 output: String::new(),
                 error: Some(format!(
-                    "npm update timed out after {}s",
+                    "{label} update timed out after {}s",
                     NPM_INSTALL_TIMEOUT.as_secs()
                 )),
             }
@@ -535,17 +623,61 @@ mod tests {
     }
 
     #[test]
-    fn npm_package_mapping_matches_supported_clis() {
+    fn update_channel_mapping_matches_supported_clis() {
+        let claude = update_channel_for_cli_key("claude").expect("claude");
+        assert_eq!(claude.package_name(), "@anthropic-ai/claude-code");
+        assert_eq!(claude.executable("claude"), "claude");
         assert_eq!(
-            npm_package_for_cli_key("claude"),
-            Some("@anthropic-ai/claude-code")
+            update_channel_for_cli_key(" Codex ").map(|c| c.package_name()),
+            Some("@openai/codex")
         );
-        assert_eq!(npm_package_for_cli_key("codex"), Some("@openai/codex"));
+
+        // The gemini slot is served by Antigravity CLI, which updates itself.
+        let gemini = update_channel_for_cli_key("gemini").expect("gemini");
         assert_eq!(
-            npm_package_for_cli_key("gemini"),
-            Some("@google/gemini-cli")
+            gemini,
+            UpdateChannel::SelfUpdate {
+                command: "agy",
+                release_repo: "google-antigravity/antigravity-cli",
+            }
         );
-        assert_eq!(npm_package_for_cli_key("unknown"), None);
+        assert_eq!(gemini.executable("gemini"), "agy");
+        assert_eq!(gemini.label(), "agy");
+
+        assert_eq!(update_channel_for_cli_key("grok"), None);
+        assert_eq!(update_channel_for_cli_key("unknown"), None);
+    }
+
+    #[test]
+    fn version_from_json_reads_npm_version_and_github_tag() {
+        assert_eq!(
+            version_from_json(r#"{"version":" 2.1.90 "}"#, "version", "npm registry"),
+            Ok("2.1.90".to_string())
+        );
+        assert_eq!(
+            version_from_json(r#"{"tag_name":"v1.5.16"}"#, "tag_name", "GitHub releases"),
+            Ok("1.5.16".to_string())
+        );
+        assert!(!is_update_available(Some("1.5.16"), "1.5.16"));
+        assert!(is_update_available(Some("1.5.15"), "1.5.16"));
+    }
+
+    #[test]
+    fn version_from_json_rejects_missing_empty_or_invalid_payloads() {
+        let missing = version_from_json(r#"{"name":"x"}"#, "tag_name", "GitHub releases");
+        assert_eq!(
+            missing,
+            Err("GitHub releases response missing tag_name".to_string())
+        );
+        assert!(
+            version_from_json(r#"{"tag_name":"  v "}"#, "tag_name", "GitHub releases").is_err()
+        );
+        assert!(version_from_json(r#"{"tag_name":12}"#, "tag_name", "GitHub releases").is_err());
+        let invalid = version_from_json("<html>", "version", "npm registry").unwrap_err();
+        assert!(
+            invalid.starts_with("failed to parse npm registry response"),
+            "{invalid}"
+        );
     }
 
     #[test]

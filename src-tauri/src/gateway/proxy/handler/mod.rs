@@ -165,6 +165,9 @@ where
     let is_codex_model_discovery =
         is_codex_model_discovery_request(&cli_key, &method, &forwarded_path);
 
+    let provider_health_neutral = is_codex_model_discovery
+        || super::gemini_catalog::is_request(&cli_key, &method, &forwarded_path);
+
     let (headers, body) = {
         let (parts, b) = req.into_parts();
         (parts.headers, b)
@@ -196,7 +199,7 @@ where
         observe_request: false,
         strip_request_content_encoding_seed: false,
         special_settings: new_special_settings(),
-        provider_health_neutral: is_codex_model_discovery,
+        provider_health_neutral,
         requested_model: None,
         requested_model_location: None,
         is_compact_request: false,

@@ -37,6 +37,7 @@ import {
   useCliManagerGeminiConfigQuery,
   useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
+  useCliManagerGeminiModelsQuery,
 } from "../../query/cliManager";
 import { isWindowsRuntime } from "../../utils/platform";
 import { formatActionFailureToast } from "../../utils/errors";
@@ -271,7 +272,10 @@ export function useCliManagerPageDataModel() {
   const geminiConfigQuery = useCliManagerGeminiConfigQuery({ enabled: tab === "gemini" });
   const geminiConfigSetMutation = useCliManagerGeminiConfigSetMutation();
   const geminiInfo = geminiInfoQuery.data ?? null;
+  const geminiModelsEnabled = tab === "gemini" && geminiInfo?.found === true;
+  const geminiModelsQuery = useCliManagerGeminiModelsQuery({ enabled: geminiModelsEnabled });
   const geminiConfig = geminiConfigQuery.data ?? null;
+  const geminiModels = geminiModelsQuery.data ?? null;
   const geminiAvailable: "checking" | "available" | "unavailable" =
     geminiInfoQuery.isFetching && !geminiInfo
       ? "checking"
@@ -509,7 +513,12 @@ export function useCliManagerPageDataModel() {
   }
 
   async function refreshGeminiInfo() {
-    await Promise.all([geminiInfoQuery.refetch(), geminiConfigQuery.refetch()]);
+    await Promise.all([
+      geminiInfoQuery.refetch(),
+      geminiConfigQuery.refetch(),
+      // Without agy the models query stays disabled; it runs once agy is found.
+      geminiModelsEnabled ? geminiModelsQuery.refetch() : undefined,
+    ]);
   }
 
   async function persistGeminiConfig(patch: GeminiConfigPatch) {
@@ -816,6 +825,8 @@ export function useCliManagerPageDataModel() {
       geminiConfigLoading,
       geminiConfigSaving,
       geminiConfig,
+      geminiModels,
+      geminiModelsError: geminiModelsQuery.isError,
       refreshGeminiInfo,
       persistGeminiConfig,
     },

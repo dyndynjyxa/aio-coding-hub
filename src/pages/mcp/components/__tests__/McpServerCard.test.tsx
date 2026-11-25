@@ -54,6 +54,24 @@ describe("pages/mcp/components/McpServerCard", () => {
     expect(onDelete).toHaveBeenCalledWith(server);
   });
 
+  it.each([true, false])("lets agy users disable but not enable SSE (enabled=%s)", (enabled) => {
+    const server = createServer({ transport: "sse", enabled });
+    const onToggleEnabled = vi.fn();
+    render(
+      <McpServerCard
+        server={server}
+        unsupportedTransport
+        toggling={false}
+        onToggleEnabled={onToggleEnabled}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Antigravity 仅支持 stdio 和 Streamable HTTP")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onToggleEnabled).toHaveBeenCalledTimes(enabled ? 1 : 0);
+  });
+
   it("falls back to placeholder text when http url is missing", () => {
     render(
       <McpServerCard

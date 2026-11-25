@@ -6,7 +6,7 @@ use crate::workspaces;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 
-use super::cli_specs::{validate_cli_key, MCP_CLI_KEYS};
+use super::cli_specs::validate_cli_key;
 
 pub(crate) fn list_enabled_for_cli(
     conn: &Connection,
@@ -139,17 +139,6 @@ pub(crate) fn sync_cli_for_workspace<R: tauri::Runtime>(
     validate_cli_key(&cli_key)?;
     let servers = list_enabled_for_workspace(conn, workspace_id)?;
     mcp_sync::sync_cli(app, &cli_key, &servers)?;
-    Ok(())
-}
-
-pub(super) fn sync_all_cli<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    conn: &Connection,
-) -> crate::shared::error::AppResult<()> {
-    for cli_key in MCP_CLI_KEYS.iter().copied() {
-        sync_one_cli(app, conn, cli_key)?;
-    }
-
     Ok(())
 }
 

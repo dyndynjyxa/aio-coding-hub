@@ -274,6 +274,19 @@ WHERE {flag_col} = 1
             .map_err(|e| format!("failed to clear legacy mcp enabled flag {flag_col}: {e}"))?;
     }
 
+    // Antigravity only supports stdio and Streamable HTTP; keep legacy SSE definitions
+    // and their enablement in every other CLI's workspaces.
+    if !column_exists(conn, "mcp_servers", "transport")? {
+        return Ok(());
+    }
+    conn.execute(
+        "DELETE FROM workspace_mcp_enabled
+         WHERE workspace_id IN (SELECT id FROM workspaces WHERE cli_key = 'gemini')
+           AND server_id IN (SELECT id FROM mcp_servers WHERE transport = 'sse')",
+        [],
+    )
+    .map_err(|e| format!("failed to retire unsupported Antigravity MCP enablement: {e}"))?;
+
     Ok(())
 }
 fn ensure_skills_scoped_by_workspace(conn: &Connection) -> crate::shared::error::AppResult<()> {

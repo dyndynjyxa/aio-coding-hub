@@ -214,7 +214,7 @@ beforeEach(() => {
 
 describe("pages/mcp/McpServersView", () => {
   it("renders empty state when there are no servers", () => {
-    renderWithQuery(<McpServersView workspaceId={1} />);
+    renderWithQuery(<McpServersView cliKey="claude" workspaceId={1} />);
 
     expect(screen.getByText("暂无 MCP 服务")).toBeInTheDocument();
     expect(screen.getByText("共 0 条")).toBeInTheDocument();
@@ -227,7 +227,7 @@ describe("pages/mcp/McpServersView", () => {
       error: new Error("boom"),
     });
 
-    renderWithQuery(<McpServersView workspaceId={9} />);
+    renderWithQuery(<McpServersView cliKey="claude" workspaceId={9} />);
 
     expect(screen.getAllByText("加载中…")).not.toHaveLength(0);
 
@@ -248,7 +248,7 @@ describe("pages/mcp/McpServersView", () => {
       toggleMutation: pendingToggle,
     });
 
-    const pendingView = renderWithQuery(<McpServersView workspaceId={1} />);
+    const pendingView = renderWithQuery(<McpServersView cliKey="claude" workspaceId={1} />);
     fireEvent.click(screen.getByRole("button", { name: "toggle-7" }));
     expect(pendingToggle.mutateAsync).not.toHaveBeenCalled();
     pendingView.unmount();
@@ -263,7 +263,7 @@ describe("pages/mcp/McpServersView", () => {
       toggleMutation,
     });
 
-    renderWithQuery(<McpServersView workspaceId={1} />);
+    renderWithQuery(<McpServersView cliKey="claude" workspaceId={1} />);
 
     fireEvent.click(screen.getByRole("button", { name: "toggle-7" }));
     await waitFor(() => {
@@ -300,7 +300,7 @@ describe("pages/mcp/McpServersView", () => {
       deleteMutation: pendingDelete,
     });
 
-    const pendingView = renderWithQuery(<McpServersView workspaceId={1} />);
+    const pendingView = renderWithQuery(<McpServersView cliKey="claude" workspaceId={1} />);
     fireEvent.click(screen.getByRole("button", { name: "confirm-delete" }));
     expect(pendingDelete.mutateAsync).not.toHaveBeenCalled();
 
@@ -320,7 +320,7 @@ describe("pages/mcp/McpServersView", () => {
       deleteMutation,
     });
 
-    renderWithQuery(<McpServersView workspaceId={1} />);
+    renderWithQuery(<McpServersView cliKey="claude" workspaceId={1} />);
 
     fireEvent.click(screen.getByRole("button", { name: "delete-3" }));
     expect(screen.getByText("delete:Delete Me")).toBeInTheDocument();
@@ -365,7 +365,7 @@ describe("pages/mcp/McpServersView", () => {
       importMutation: pendingImport,
     });
 
-    const pendingView = renderWithQuery(<McpServersView workspaceId={11} />);
+    const pendingView = renderWithQuery(<McpServersView cliKey="claude" workspaceId={11} />);
     expect(screen.getByRole("button", { name: "导入中…" })).toHaveAttribute(
       "data-disabled",
       "true"
@@ -390,7 +390,7 @@ describe("pages/mcp/McpServersView", () => {
       importMutation,
     });
 
-    renderWithQuery(<McpServersView workspaceId={11} />);
+    renderWithQuery(<McpServersView cliKey="claude" workspaceId={11} />);
 
     fireEvent.click(screen.getByRole("button", { name: "导入已有" }));
     await waitFor(() => {
@@ -430,7 +430,7 @@ describe("pages/mcp/McpServersView", () => {
       data: [server],
     });
 
-    renderWithQuery(<McpServersView workspaceId={1} />);
+    renderWithQuery(<McpServersView cliKey="claude" workspaceId={1} />);
 
     expect(screen.getByTestId("server-dialog")).toHaveAttribute("data-open", "false");
     expect(screen.getByText("editing:none")).toBeInTheDocument();

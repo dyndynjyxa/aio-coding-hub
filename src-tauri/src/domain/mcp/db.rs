@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::backups::{CliBackupSnapshots, SingleCliBackup};
-use super::sync::{sync_all_cli, sync_one_cli};
+use super::sync::sync_one_cli;
 use super::types::{McpImportServer, McpServerSummary};
 use super::validate::{suggest_key, validate_cli_key, validate_server_key, validate_transport};
 use crate::shared::text::normalize_name;
@@ -316,7 +316,14 @@ pub fn list_for_workspace(
     workspace_id: i64,
 ) -> crate::shared::error::AppResult<Vec<McpServerSummary>> {
     let conn = db.open_connection()?;
-    let _ = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
+    list_for_workspace_on(&conn, workspace_id)
+}
+
+pub(super) fn list_for_workspace_on(
+    conn: &Connection,
+    workspace_id: i64,
+) -> crate::shared::error::AppResult<Vec<McpServerSummary>> {
+    let _ = workspaces::get_cli_key_by_id(conn, workspace_id)?;
 
     let mut stmt = conn
         .prepare_cached(
@@ -355,8 +362,8 @@ pub fn list_for_workspace(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn upsert(
-    app: &tauri::AppHandle,
+pub fn upsert<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
     server_id: Option<i64>,
     server_key: &str,
@@ -405,6 +412,20 @@ pub fn upsert(
         None => None,
     };
 
+    if transport == "sse" {
+        if let Some(id) = server_id {
+            let enabled_in_agy: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM workspace_mcp_enabled e JOIN workspaces w ON w.id=e.workspace_id WHERE e.server_id=?1 AND w.cli_key='gemini')",
+                [id], |row| row.get(0)
+            ).map_err(|e| db_err!("failed to check Antigravity MCP enablement: {e}"))?;
+            if enabled_in_agy {
+                return Err(
+                    "SEC_INVALID_INPUT: 改用旧版 SSE 前，请先在 Antigravity 工作区停用此服务"
+                        .into(),
+                );
+            }
+        }
+    }
     let resolved_key = match existing_server.as_ref() {
         None => {
             if provided_key.is_empty() {
@@ -538,7 +559,7 @@ WHERE id = ?11
         }
     };
 
-    if let Err(err) = sync_all_cli(app, &tx) {
+    if let Err(err) = snapshots.sync_all(app, &tx) {
         snapshots.restore_all(app);
         return Err(err);
     }
@@ -551,8 +572,8 @@ WHERE id = ?11
     get_by_id(&conn, id)
 }
 
-pub fn set_enabled(
-    app: &tauri::AppHandle,
+pub fn set_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
     workspace_id: i64,
     server_id: i64,
@@ -566,6 +587,11 @@ pub fn set_enabled(
 
     let cli_key = workspaces::get_cli_key_by_id(&tx, workspace_id)?;
     validate_cli_key(&cli_key)?;
+    if enabled && cli_key == "gemini" && get_by_id(&tx, server_id)?.transport == "sse" {
+        return Err(
+            "SEC_INVALID_INPUT: Antigravity CLI 仅支持 stdio 和 Streamable HTTP MCP 服务".into(),
+        );
+    }
     let should_sync = workspaces::is_active_workspace(&tx, workspace_id)?;
 
     let backup = if should_sync {
@@ -612,8 +638,8 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
     get_by_id_for_workspace(&conn, workspace_id, server_id)
 }
 
-pub fn delete(
-    app: &tauri::AppHandle,
+pub fn delete<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
     server_id: i64,
 ) -> crate::shared::error::AppResult<()> {
@@ -631,7 +657,7 @@ pub fn delete(
         return Err("DB_NOT_FOUND: mcp server not found".to_string().into());
     }
 
-    if let Err(err) = sync_all_cli(app, &tx) {
+    if let Err(err) = snapshots.sync_all(app, &tx) {
         snapshots.restore_all(app);
         return Err(err);
     }

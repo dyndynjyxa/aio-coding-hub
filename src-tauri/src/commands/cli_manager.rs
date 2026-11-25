@@ -142,6 +142,18 @@ pub(crate) async fn cli_manager_gemini_config_set(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn cli_manager_gemini_models_list(
+    app: tauri::AppHandle,
+) -> Result<Vec<cli_manager::GeminiModelOption>, String> {
+    blocking::run("cli_manager_gemini_models_list", move || {
+        cli_manager::gemini_models_list(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_grok_info_get(
     app: tauri::AppHandle,
 ) -> Result<cli_manager::SimpleCliInfo, String> {

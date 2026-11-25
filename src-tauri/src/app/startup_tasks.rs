@@ -56,6 +56,23 @@ async fn run(app_handle: tauri::AppHandle) {
         }
     }
 
+    // Existing managed MCP servers should be available on the first agy launch,
+    // including installations that don't start the gateway automatically.
+    if let Err(error) = crate::blocking::run("startup_migrate_antigravity_mcp", {
+        let app = app_handle.clone();
+        let db = db.clone();
+        move || -> crate::shared::error::AppResult<()> {
+            if crate::mcp_sync::antigravity_rebind_needed(&app)? {
+                let conn = db.open_connection()?;
+                crate::mcp::sync_one_cli(&app, &conn, "gemini")?;
+            }
+            Ok(())
+        }
+    })
+    .await
+    {
+        tracing::warn!(%error, "Antigravity MCP migration deferred until next sync");
+    }
     crate::request_logs::spawn_retention_task(app_handle.clone(), db.clone());
 
     // Non-fatal: grant asset protocol access to image gen storage dirs so

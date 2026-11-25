@@ -11,6 +11,8 @@ import {
   type CodexModelCatalogState,
   type SimpleCliInfo,
   type GrokConfigState,
+  cliManagerGeminiConfigSet,
+  cliManagerGeminiModelsList,
   cliManagerClaudeEnvSet,
   cliManagerClaudeHooksGet,
   cliManagerClaudeHooksSet,
@@ -36,6 +38,8 @@ vi.mock("../../../generated/bindings", async () => {
     ...actual,
     commands: {
       ...actual.commands,
+      cliManagerGeminiConfigSet: vi.fn(),
+      cliManagerGeminiModelsList: vi.fn(),
       cliManagerClaudeInfoGet: vi.fn(),
       cliManagerCodexInfoGet: vi.fn(),
       cliManagerCodexModelCatalogGet: vi.fn(),
@@ -395,5 +399,43 @@ describe("services/cli/cliManager", () => {
     } as const;
     await cliManagerGrokConfigSet(preferences);
     expect(commands.cliManagerGrokConfigSet).toHaveBeenCalledWith(preferences);
+  });
+
+  it("fills untouched agy settings with null so the backend leaves them alone", async () => {
+    vi.mocked(commands.cliManagerGeminiConfigSet).mockResolvedValue({
+      status: "ok",
+      data: {} as never,
+    });
+
+    await cliManagerGeminiConfigSet({ model: "Gemini 4 Neon (High)", notifications: false });
+
+    expect(commands.cliManagerGeminiConfigSet).toHaveBeenCalledWith({
+      model: "Gemini 4 Neon (High)",
+      agentMode: null,
+      toolPermission: null,
+      artifactReviewPolicy: null,
+      enableTerminalSandbox: null,
+      allowNonWorkspaceAccess: null,
+      colorScheme: null,
+      altScreenMode: null,
+      verbosity: null,
+      editorMode: null,
+      notifications: false,
+      showTips: null,
+    });
+  });
+
+  it("logs and rethrows when agy models cannot be listed", async () => {
+    vi.mocked(commands.cliManagerGeminiModelsList).mockResolvedValueOnce({
+      status: "error",
+      error: "CLI_NOT_FOUND: Antigravity CLI (agy) is not installed",
+    } as never);
+
+    await expect(cliManagerGeminiModelsList()).rejects.toThrow("CLI_NOT_FOUND");
+    expect(logToConsole).toHaveBeenCalledWith(
+      "error",
+      "读取 Gemini 模型列表失败",
+      expect.objectContaining({ cmd: "cli_manager_gemini_models_list" })
+    );
   });
 });

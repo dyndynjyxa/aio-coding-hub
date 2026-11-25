@@ -8,16 +8,16 @@ use std::thread::JoinHandle;
 
 use super::config_claude::configure_wsl_claude;
 use super::config_codex::configure_wsl_codex;
-use super::config_gemini::configure_wsl_gemini;
+use super::config_gemini::{agy_config_applied, pin_legacy_home, plan_wsl_agy};
 use super::constants::{
     WSL_CODEX_API_KEY, WSL_CODEX_PREFERRED_AUTH_METHOD, WSL_CODEX_PROVIDER_KEY,
 };
 use super::detection::resolve_wsl_home_unc;
 use super::manifest::{
-    read_wsl_current_values, read_wsl_manifest, supplement_legacy_codex_provider_backup,
-    write_wsl_manifest, CODEX_PROVIDER_ORIGINAL_SECTION,
+    delete_wsl_manifest, read_wsl_current_values, read_wsl_manifest,
+    supplement_legacy_codex_provider_backup, write_wsl_manifest, CODEX_PROVIDER_ORIGINAL_SECTION,
 };
-use super::mcp_sync::{read_wsl_mcp_manifest, sync_wsl_mcp_for_cli, write_wsl_mcp_manifest};
+use super::mcp_sync::sync_wsl_mcp_for_cli;
 use super::prompt_sync::sync_wsl_prompt_for_cli;
 use super::shell::{decode_utf16_le, hide_window_cmd, wsl_resolve_codex_home_script};
 use super::skills_sync::{
@@ -192,7 +192,10 @@ fn wsl_target_enabled(targets: &settings::WslTargetCli, cli_key: &str) -> bool {
     }
 }
 
-pub fn get_config_status(distros: &[String]) -> Vec<WslDistroConfigStatus> {
+pub fn get_config_status<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    distros: &[String],
+) -> Vec<WslDistroConfigStatus> {
     if !cfg!(windows) {
         return Vec::new();
     }
@@ -208,7 +211,6 @@ export HOME
 
 claude=0
 codex=0
-gemini=0
 claude_mcp=0
 codex_mcp=0
 gemini_mcp=0
@@ -221,17 +223,15 @@ gemini_prompt=0
 {resolver}
 
 [ -f "$p/config.toml" ] && codex=1
-[ -f "$HOME/.gemini/.env" ] && gemini=1
-
-# Check MCP: claude uses .claude.json mcpServers, codex uses config.toml mcp_servers, gemini uses settings.json mcpServers
+# Check MCP: claude uses .claude.json mcpServers, codex uses config.toml mcp_servers, Antigravity uses mcp_config.json mcpServers
 if [ -f "$HOME/.claude.json" ] && command -v grep >/dev/null 2>&1; then
   grep -q '"mcpServers"' "$HOME/.claude.json" 2>/dev/null && claude_mcp=1
 fi
 if [ -f "$p/config.toml" ] && command -v grep >/dev/null 2>&1; then
   grep -q '\[mcp_servers\.' "$p/config.toml" 2>/dev/null && codex_mcp=1
 fi
-if [ -f "$HOME/.gemini/settings.json" ] && command -v grep >/dev/null 2>&1; then
-  grep -q '"mcpServers"' "$HOME/.gemini/settings.json" 2>/dev/null && gemini_mcp=1
+if [ -f "$HOME/.gemini/config/mcp_config.json" ] && command -v grep >/dev/null 2>&1; then
+  grep -q '"mcpServers"' "$HOME/.gemini/config/mcp_config.json" 2>/dev/null && gemini_mcp=1
 fi
 
 # Check Prompt files
@@ -239,16 +239,15 @@ fi
 [ -f "$p/AGENTS.md" ] && codex_prompt=1
 [ -f "$HOME/.gemini/GEMINI.md" ] && gemini_prompt=1
 
-printf 'AIO_WSL_STATUS=%s%s%s%s%s%s%s%s%s\n' "$claude" "$codex" "$gemini" "$claude_mcp" "$codex_mcp" "$gemini_mcp" "$claude_prompt" "$codex_prompt" "$gemini_prompt"
+printf 'AIO_WSL_STATUS=%s%s%s%s%s%s%s%s\n' "$claude" "$codex" "$claude_mcp" "$codex_mcp" "$gemini_mcp" "$claude_prompt" "$codex_prompt" "$gemini_prompt"
 "#,
-        resolver = wsl_resolve_codex_home_script("p")
+        resolver = wsl_resolve_codex_home_script("p"),
     );
 
     #[derive(Default)]
     struct StatusBits {
         claude: bool,
         codex: bool,
-        gemini: bool,
         claude_mcp: bool,
         codex_mcp: bool,
         gemini_mcp: bool,
@@ -266,7 +265,6 @@ printf 'AIO_WSL_STATUS=%s%s%s%s%s%s%s%s%s\n' "$claude" "$codex" "$gemini" "$clau
         Some(StatusBits {
             claude: bits.next()? == '1',
             codex: bits.next()? == '1',
-            gemini: bits.next()? == '1',
             claude_mcp: bits.next()? == '1',
             codex_mcp: bits.next()? == '1',
             gemini_mcp: bits.next()? == '1',
@@ -349,7 +347,7 @@ printf 'AIO_WSL_STATUS=%s%s%s%s%s%s%s%s%s\n' "$claude" "$codex" "$gemini" "$clau
             distro: distro.clone(),
             claude: bits.claude,
             codex: bits.codex,
-            gemini: bits.gemini,
+            gemini: agy_config_applied(app, distro).unwrap_or(false),
             claude_mcp: bits.claude_mcp,
             codex_mcp: bits.codex_mcp,
             gemini_mcp: bits.gemini_mcp,
@@ -396,7 +394,9 @@ pub fn configure_clients(
     for distro in distros {
         let mut results = Vec::new();
         // Load existing manifest so we don't overwrite original_values on repeated calls
-        let existing_manifest = match read_wsl_manifest(app, distro) {
+        let existing_manifest = match read_wsl_manifest(app, distro)
+            .and_then(|m| m.map(|m| pin_legacy_home(distro, m)).transpose())
+        {
             Ok(value) => value,
             Err(error) => {
                 error_ops += 1;
@@ -432,11 +432,62 @@ pub fn configure_clients(
             ("codex", targets.codex),
             ("gemini", targets.gemini),
         ] {
+            if cli_key == "gemini" {
+                let previous = existing_backups.get(cli_key).copied();
+                if !enabled && previous.is_none() {
+                    continue;
+                }
+                let configured = (|| -> AppResult<()> {
+                    let cached = existing_manifest
+                        .as_ref()
+                        .and_then(|m| m.wsl_home_unc.as_ref())
+                        .map(std::path::PathBuf::from);
+                    let home = if enabled {
+                        resolve_wsl_home_unc(distro)?
+                    } else {
+                        match cached {
+                            Some(home) => home,
+                            None => resolve_wsl_home_unc(distro)?,
+                        }
+                    };
+                    let plan =
+                        plan_wsl_agy(distro, &home, previous, enabled.then_some(proxy_origin))?;
+                    // A partial apply can be undone from the old and new ownership
+                    // records even if the app exits before the final manifest write.
+                    let mut backups = cli_backups.clone();
+                    backups.retain(|b| b.cli_key != cli_key);
+                    backups.push(plan.pending.clone());
+                    write_wsl_manifest(
+                        app,
+                        distro,
+                        &WslDistroManifest {
+                            schema_version: 1,
+                            distro: distro.clone(),
+                            configured: true,
+                            proxy_origin: proxy_origin.into(),
+                            configured_at: crate::shared::time::now_unix_seconds(),
+                            wsl_home_unc: Some(home.to_string_lossy().into_owned()),
+                            cli_backups: backups.clone(),
+                        },
+                    )?;
+                    cli_backups = backups;
+                    plan.apply(distro)?;
+                    cli_backups.retain(|b| b.cli_key != cli_key);
+                    cli_backups.extend(plan.retained);
+                    Ok(())
+                })();
+                results.push(WslConfigureCliReport {
+                    cli_key: cli_key.into(),
+                    ok: configured.is_ok(),
+                    message: configured
+                        .map(|()| "ok".into())
+                        .unwrap_or_else(|e| e.to_string()),
+                });
+                continue;
+            }
             if !enabled {
                 continue;
             }
-            // If we already have a backup for this CLI (from a prior call), preserve
-            // the original_values; otherwise capture fresh ones now.
             let mut original_values = if let Some(prev) = existing_backups.get(cli_key) {
                 prev.original_values.clone()
             } else {
@@ -500,7 +551,6 @@ pub fn configure_clients(
             let configured = match cli_key {
                 "claude" => configure_wsl_claude(distro, proxy_origin),
                 "codex" => configure_wsl_codex(distro, proxy_origin, supports_websockets),
-                "gemini" => configure_wsl_gemini(distro, proxy_origin),
                 _ => unreachable!(),
             };
             match configured {
@@ -534,15 +584,6 @@ pub fn configure_clients(
                                 "model_providers.aio.supports_websockets".to_string(),
                                 supports_websockets.to_string(),
                             );
-                            m
-                        }
-                        "gemini" => {
-                            let mut m = std::collections::HashMap::new();
-                            m.insert(
-                                "GOOGLE_GEMINI_BASE_URL".to_string(),
-                                format!("{proxy_origin}/gemini"),
-                            );
-                            m.insert("GEMINI_API_KEY".to_string(), "aio-coding-hub".to_string());
                             m
                         }
                         _ => std::collections::HashMap::new(),
@@ -579,23 +620,17 @@ pub fn configure_clients(
                 if !wsl_target_enabled(targets, cli_key) {
                     continue;
                 }
-                let managed_keys = read_wsl_mcp_manifest(app, distro, cli_key);
-                if servers.is_empty() && managed_keys.is_empty() {
-                    continue;
-                }
-                match sync_wsl_mcp_for_cli(distro, cli_key, servers, &managed_keys) {
-                    Ok(new_keys) => {
-                        if let Err(e) = write_wsl_mcp_manifest(app, distro, cli_key, &new_keys) {
-                            tracing::warn!(
-                                distro = distro,
-                                cli_key = cli_key,
-                                "failed to write WSL MCP manifest: {e}"
-                            );
+                match sync_wsl_mcp_for_cli(app, distro, cli_key, servers) {
+                    Ok(None) => continue,
+                    Ok(Some(synced)) => {
+                        let mut message = format!("已同步 {} 个服务", synced.count);
+                        if synced.legacy_cleanup_skipped {
+                            message.push_str("，旧 Gemini settings.json 未清理");
                         }
                         results.push(WslConfigureCliReport {
                             cli_key: format!("{cli_key}_mcp"),
                             ok: true,
-                            message: format!("ok ({} servers)", new_keys.len()),
+                            message,
                         });
                     }
                     Err(err) => {
@@ -678,7 +713,15 @@ pub fn configure_clients(
         }
 
         // -- Write manifest for this distro --
-        if !cli_backups.is_empty() {
+        if cli_backups.is_empty() && existing_manifest.is_some() {
+            if let Err(error) = delete_wsl_manifest(app, distro) {
+                results.push(WslConfigureCliReport {
+                    cli_key: "manifest".into(),
+                    ok: false,
+                    message: error.to_string(),
+                });
+            }
+        } else if !cli_backups.is_empty() {
             let wsl_home_unc = resolve_wsl_home_unc(distro)
                 .ok()
                 .map(|p| p.to_string_lossy().to_string());

@@ -3262,32 +3262,223 @@ fn merge_restore_codex_auth_preserves_user_changes() {
 }
 
 #[test]
-fn merge_restore_gemini_env_preserves_user_changes() {
-    let tmp = tempfile::tempdir().unwrap();
+fn agy_upgrade_restores_only_owned_legacy_env_and_needs_explicit_enable() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let dir = test.home.path().join(".gemini");
+    let path = dir.join(".env");
+    let base = "http://127.0.0.1:37123";
+    std::fs::create_dir_all(&dir).unwrap();
+    let files = cli_proxy_files_dir(&cli_proxy_root_dir(&app, "gemini").unwrap());
+    std::fs::create_dir_all(&files).unwrap();
+    std::fs::write(files.join(".env"), "GEMINI_API_KEY=original-key\n").unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "GOOGLE_GEMINI_BASE_URL={base}/gemini\nGEMINI_API_KEY=aio-coding-hub\nUSER_VAR=hello\n"
+        ),
+    )
+    .unwrap();
+    write_cli_proxy_manifest(&app, "gemini", true, Some(base));
+    let mut manifest = read_manifest(&app, "gemini").unwrap().unwrap();
+    manifest.files.push(BackupFileEntry {
+        kind: "gemini_env".into(),
+        path: path.to_string_lossy().into_owned(),
+        existed: true,
+        backup_rel: Some(".env".into()),
+    });
+    // A crash during a port change can leave the old manifest one port behind the file.
+    manifest.base_origin = Some("http://127.0.0.1:37122".into());
+    write_manifest(&app, "gemini", &manifest).unwrap();
 
-    // Backup: had original API key
-    let backup = write_temp(
-        tmp.path(),
-        "backup.env",
-        b"GEMINI_API_KEY=original-key\nCUSTOM_VAR=keep\n",
+    let rows = sync_enabled(&app, base, true).unwrap();
+    assert!(rows
+        .iter()
+        .any(|r| r.cli_key == "gemini" && r.ok && !r.enabled));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "GEMINI_API_KEY=original-key\nUSER_VAR=hello\n"
     );
+    assert!(!is_enabled(&app, "gemini").unwrap());
 
-    // Current: proxy replaced keys, user added new var
-    let target = write_temp(
-        tmp.path(),
-        ".env",
-        b"GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:37123/gemini\nGEMINI_API_KEY=aio-coding-hub\nUSER_VAR=hello\n",
+    manifest.base_origin = Some(base.into());
+    write_manifest(&app, "gemini", &manifest).unwrap();
+    std::fs::write(&path, format!("GOOGLE_GEMINI_BASE_URL={base}/gemini\nexport GOOGLE_GEMINI_BASE_URL=https://new.example\nGEMINI_API_KEY=aio-coding-hub\n")).unwrap();
+    let rows = sync_enabled(&app, base, true).unwrap();
+    assert!(rows.iter().any(|r| r.cli_key == "gemini" && r.ok));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "export GOOGLE_GEMINI_BASE_URL=https://new.example\n"
     );
+    std::fs::write(&path, "GEMINI_API_KEY=user-edit\n").unwrap();
+    assert!(sync_enabled(&app, base, true).unwrap().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "GEMINI_API_KEY=user-edit\n"
+    );
+}
 
-    merge_restore_gemini_env(&target, &backup).unwrap();
+#[test]
+fn agy_gateway_round_trip_respects_new_port_and_live_app_writes() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let path = gemini::path(&app).unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = serde_json::json!({"plugins":{"keep":1},"gateway":{"url":"https://previous.test","apiKey":"previous","headers":{"private":"old"},"enabled":false,"newOption":42}});
+    std::fs::write(&path, original.to_string()).unwrap();
+    let first = "http://127.0.0.1:37123";
+    let next = "http://127.0.0.1:37124";
+    assert!(set_enabled(&app, "gemini", true, first).unwrap().ok);
+    let active: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(active["gateway"]["newOption"], 42);
+    assert_eq!(active["gateway"]["wireProtocol"], "genai");
+    assert!(active["gateway"].get("headers").is_none());
+    assert!(gemini::ready(&app, first));
+    sync_enabled(&app, next, false).unwrap();
+    assert!(gemini::ready(&app, first));
+    let mut partial = active;
+    partial["gateway"]["wireProtocol"] = serde_json::json!("openai");
+    std::fs::write(&path, partial.to_string()).unwrap();
+    assert!(sync_enabled(&app, next, true)
+        .unwrap()
+        .iter()
+        .any(|r| r.ok && r.cli_key == "gemini"));
+    assert!(gemini::ready(&app, next));
+    let mut changed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    changed["userSettings"] = serde_json::json!({"editor":true});
+    std::fs::write(&path, changed.to_string()).unwrap();
+    assert!(set_enabled(&app, "gemini", false, next).unwrap().ok);
+    let result: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(result["gateway"], original["gateway"]);
+    assert_eq!(result["userSettings"]["editor"], true);
+    assert_eq!(result["plugins"], original["plugins"]);
 
-    let result = std::fs::read_to_string(&target).unwrap();
-    // Proxy base URL removed (backup didn't have it)
-    assert!(!result.contains("GOOGLE_GEMINI_BASE_URL"));
-    // Original API key restored
-    assert!(result.contains("GEMINI_API_KEY=original-key"));
-    // User's addition preserved
-    assert!(result.contains("USER_VAR=hello"));
+    // Desktop may flush its stale in-memory state during shutdown.
+    std::fs::write(&path, changed.to_string()).unwrap();
+    startup_repair_incomplete_enable(&app).unwrap();
+    assert!(!is_enabled(&app, "gemini").unwrap());
+    let restored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(restored, result);
+}
+
+#[test]
+fn agy_stale_gateway_on_an_old_port_never_replaces_direct_backup() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let path = gemini::path(&app).unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let direct = serde_json::json!({"gateway":{"url":"https://direct.test","apiKey":"direct-key","headers":{"private":"direct"}}});
+    let [first, next, last] = [
+        "http://127.0.0.1:37123",
+        "http://127.0.0.1:37124",
+        "http://127.0.0.1:37125",
+    ];
+    std::fs::write(&path, direct.to_string()).unwrap();
+    assert!(set_enabled(&app, "gemini", true, first).unwrap().ok);
+    let mut cached: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    cached["userSettings"] = serde_json::json!({"live":true});
+    for enabled in [true, false] {
+        assert!(set_enabled(&app, "gemini", true, next).unwrap().ok);
+        if !enabled {
+            assert!(set_enabled(&app, "gemini", false, next).unwrap().ok);
+        }
+        std::fs::write(&path, cached.to_string()).unwrap();
+        assert!(set_enabled(&app, "gemini", true, last).unwrap().ok);
+        assert!(gemini::ready(&app, last));
+        assert!(set_enabled(&app, "gemini", false, last).unwrap().ok);
+        let actual: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(actual["gateway"], direct["gateway"]);
+        assert_eq!(actual["userSettings"], cached["userSettings"]);
+    }
+    std::fs::write(&path, cached.to_string()).unwrap();
+    startup_repair_incomplete_enable(&app).unwrap();
+    let restored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(restored["gateway"], direct["gateway"]);
+    assert!(!is_enabled(&app, "gemini").unwrap());
+}
+
+#[test]
+fn agy_reenable_requires_the_recorded_backup_but_respects_original_absence() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let path = gemini::path(&app).unwrap();
+    let origin = "http://127.0.0.1:37123";
+    assert!(set_enabled(&app, "gemini", true, origin).unwrap().ok);
+    let cached = std::fs::read(&path).unwrap();
+    assert!(set_enabled(&app, "gemini", false, origin).unwrap().ok);
+    std::fs::write(&path, &cached).unwrap();
+    assert!(set_enabled(&app, "gemini", true, origin).unwrap().ok);
+    assert!(set_enabled(&app, "gemini", false, origin).unwrap().ok);
+    assert!(!path.exists());
+
+    std::fs::write(&path, br#"{"gateway":{"url":"https://user.example"}}"#).unwrap();
+    assert!(set_enabled(&app, "gemini", true, origin).unwrap().ok);
+    assert!(set_enabled(&app, "gemini", false, origin).unwrap().ok);
+    let backup = cli_proxy_files_dir(&cli_proxy_root_dir(&app, "gemini").unwrap())
+        .join("antigravity-config.json");
+    std::fs::remove_file(backup).unwrap();
+    std::fs::write(&path, &cached).unwrap();
+    let result = set_enabled(&app, "gemini", true, "http://127.0.0.1:37124").unwrap();
+    assert!(!result.ok && result.message.contains("AGY_NO_BACKUP"));
+    assert_eq!(std::fs::read(&path).unwrap(), cached);
+    assert!(!is_enabled(&app, "gemini").unwrap());
+}
+
+#[test]
+fn agy_bom_config_round_trips_and_manual_gateway_is_preserved() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let path = gemini::path(&app).unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = "\u{feff}{\"userSettings\":{},\"gateway\":{\"url\":\"http://localhost:4321/gemini\",\"apiKey\":\"aio-coding-hub\"}}";
+    std::fs::write(&path, original).unwrap();
+    let origin = "http://127.0.0.1:37123";
+    assert!(set_enabled(&app, "gemini", true, origin).unwrap().ok);
+    assert!(set_enabled(&app, "gemini", false, origin).unwrap().ok);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+}
+
+#[test]
+fn agy_gateway_declines_invalid_json_without_touching_user_config() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let path = gemini::path(&app).unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"{broken").unwrap();
+    let r = set_enabled(&app, "gemini", true, "http://127.0.0.1:37123").unwrap();
+    assert!(!r.ok);
+    assert!(!is_enabled(&app, "gemini").unwrap());
+    assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
+
+    std::fs::remove_file(&path).unwrap();
+    let origin = "http://127.0.0.1:37123";
+    assert!(set_enabled(&app, "gemini", true, origin).unwrap().ok);
+    std::fs::write(&path, b"{truncated").unwrap();
+    assert!(!set_enabled(&app, "gemini", false, origin).unwrap().ok);
+    assert!(is_enabled(&app, "gemini").unwrap());
+    assert_eq!(std::fs::read(path).unwrap(), b"{truncated");
+}
+
+#[test]
+fn agy_gateway_takes_a_fresh_backup_after_exit_restores_direct_mode() {
+    let test = CliProxyTestApp::new();
+    let app = test.handle();
+    let origin = "http://localhost:37123";
+    let path = gemini::path(&app).unwrap();
+    assert!(set_enabled(&app, "gemini", true, origin).unwrap().ok);
+    restore_enabled_keep_state(&app).unwrap();
+    assert!(!path.exists());
+    let direct = br#"{"gateway":{"enabled":true,"url":"https://direct.test","apiKey":"user-key"}}"#;
+    std::fs::write(&path, direct).unwrap();
+    sync_enabled(&app, origin, true).unwrap();
+    assert!(gemini::ready(&app, origin));
+    assert!(set_enabled(&app, "gemini", false, origin).unwrap().ok);
+    assert_eq!(std::fs::read(path).unwrap(), direct);
 }
 
 #[test]
@@ -3440,6 +3631,9 @@ fn malformed_client_manifest_does_not_skip_other_cli_lifecycle_work() {
     sync_enabled(&app, next_origin, true).unwrap();
     for cli_key in ["codex", "gemini", "grok"] {
         let mut manifest = read_manifest(&app, cli_key).unwrap().unwrap();
+        if cli_key == "gemini" {
+            manifest.pending_apply = Some(next_origin.to_string());
+        }
         manifest.enabled = false;
         write_manifest(&app, cli_key, &manifest).unwrap();
     }

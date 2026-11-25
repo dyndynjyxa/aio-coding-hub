@@ -10,8 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::backups::CliBackupSnapshots;
 use super::cli_specs::MCP_CLI_KEYS;
-use super::db::{list_for_workspace, upsert_by_name};
-use super::sync::sync_all_cli;
+use super::db::{list_for_workspace_on, upsert_by_name};
 use super::types::{McpImportReport, McpImportServer, McpImportSkip, McpParseResult};
 use super::validate::{suggest_key, validate_server_key};
 use crate::shared::text::normalize_name;
@@ -143,6 +142,7 @@ fn infer_transport_from_json_spec(spec: &serde_json::Value) -> String {
     }
 
     if spec.get("url").and_then(|v| v.as_str()).is_some()
+        || spec.get("serverUrl").and_then(|v| v.as_str()).is_some()
         || spec.get("httpUrl").and_then(|v| v.as_str()).is_some()
         || spec.get("headers").is_some()
         || spec.get("http_headers").is_some()
@@ -180,6 +180,7 @@ fn resolve_enabled_from_json(entry: &serde_json::Value, spec: &serde_json::Value
 
     spec.get("enabled")
         .and_then(|v| v.as_bool())
+        .or_else(|| spec.get("disabled").and_then(|v| v.as_bool()).map(|v| !v))
         .unwrap_or(true)
 }
 
@@ -199,6 +200,7 @@ fn parse_json_server_entry(
         .map(|s| s.to_string());
     let url = spec
         .get("url")
+        .or_else(|| spec.get("serverUrl"))
         .or_else(|| spec.get("httpUrl"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
@@ -490,7 +492,10 @@ fn parse_code_switch_r(root: &serde_json::Value) -> Result<Vec<McpImportServer>,
 }
 
 pub fn parse_json(json_text: &str) -> crate::shared::error::AppResult<McpParseResult> {
-    let json_text = json_text.trim();
+    let json_text = json_text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(json_text)
+        .trim();
     if json_text.is_empty() {
         return Err("SEC_INVALID_INPUT: JSON is required".to_string().into());
     }
@@ -666,7 +671,7 @@ pub fn import_servers<R: tauri::Runtime>(
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
 
-    let _cli_key = workspaces::get_cli_key_by_id(&tx, workspace_id)?;
+    let cli_key = workspaces::get_cli_key_by_id(&tx, workspace_id)?;
     let snapshots = CliBackupSnapshots::capture_all(app)?;
 
     let mut inserted = 0u32;
@@ -688,7 +693,7 @@ pub fn import_servers<R: tauri::Runtime>(
         deduped.push(server);
     }
 
-    let existing_servers = list_for_workspace(db, workspace_id)?;
+    let existing_servers = list_for_workspace_on(&tx, workspace_id)?;
     let mut existing_by_name: HashMap<String, super::types::McpServerSummary> = HashMap::new();
     let mut existing_by_key: HashMap<String, super::types::McpServerSummary> = HashMap::new();
     for row in existing_servers {
@@ -699,7 +704,10 @@ pub fn import_servers<R: tauri::Runtime>(
     for server in &deduped {
         let normalized = normalize_name(&server.name);
         if let Some(existing) = existing_by_name.get(&normalized) {
-            if server.enabled && !existing.enabled {
+            if server.enabled
+                && !existing.enabled
+                && !(cli_key == "gemini" && existing.transport == "sse")
+            {
                 tx.execute(
                     r#"
 INSERT INTO workspace_mcp_enabled(workspace_id, server_id, created_at, updated_at)
@@ -726,7 +734,10 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         }
 
         if let Some(existing) = existing_by_key.get(&server.server_key) {
-            if server.enabled && !existing.enabled {
+            if server.enabled
+                && !existing.enabled
+                && !(cli_key == "gemini" && existing.transport == "sse")
+            {
                 tx.execute(
                     r#"
 INSERT INTO workspace_mcp_enabled(workspace_id, server_id, created_at, updated_at)
@@ -759,7 +770,8 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
             updated += 1;
         }
 
-        if server.enabled {
+        let enabled = server.enabled && !(cli_key == "gemini" && server.transport == "sse");
+        if enabled {
             tx.execute(
                 r#"
 INSERT INTO workspace_mcp_enabled(workspace_id, server_id, created_at, updated_at)
@@ -783,7 +795,7 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
             cwd: server.cwd.clone(),
             url: server.url.clone(),
             headers: server.headers.clone(),
-            enabled: server.enabled,
+            enabled,
             created_at: now,
             updated_at: now,
         };
@@ -791,7 +803,7 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         existing_by_key.insert(inserted_row.server_key.clone(), inserted_row);
     }
 
-    if let Err(err) = sync_all_cli(app, &tx) {
+    if let Err(err) = snapshots.sync_all(app, &tx) {
         snapshots.restore_all(app);
         return Err(err);
     }
@@ -830,6 +842,18 @@ mod tests {
                 None => std::env::remove_var(self.0),
             }
         }
+    }
+
+    #[test]
+    fn antigravity_import_recognizes_remote_urls_and_disabled_servers() {
+        let parsed = parse_json(
+            r#"{"mcpServers":{"server":{"serverUrl":"https://example.test/mcp","disabled":true}}}"#,
+        )
+        .unwrap();
+        let server = &parsed.servers[0];
+        assert_eq!(server.transport, "http");
+        assert_eq!(server.url.as_deref(), Some("https://example.test/mcp"));
+        assert!(!server.enabled);
     }
 
     #[test]

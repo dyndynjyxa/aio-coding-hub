@@ -258,8 +258,12 @@ pub fn apply<R: tauri::Runtime>(
 
     let prev_prompt_target = prompt_sync::read_target_bytes(app, &cli_key)?;
     let prev_prompt_manifest = prompt_sync::read_manifest_bytes(app, &cli_key)?;
-    let prev_mcp_target = mcp_sync::read_target_bytes(app, &cli_key)?;
-    let prev_mcp_manifest = mcp_sync::read_manifest_bytes(app, &cli_key)?;
+    // Local-server stashing must classify entries on the Antigravity target
+    // after ownership has moved from the old Gemini CLI file.
+    if cli_key == "gemini" && mcp_sync::antigravity_rebind_needed(app)? {
+        mcp::sync_one_cli(app, &conn, &cli_key)?;
+    }
+    let prev_mcp = mcp::SingleCliBackup::capture(app, &cli_key)?;
     let managed_mcp_server_keys: HashSet<String> = list_enabled_mcp_keys(&conn, from_workspace_id)?
         .into_iter()
         .collect();
@@ -279,16 +283,14 @@ pub fn apply<R: tauri::Runtime>(
     ) {
         let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
         let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
+        prev_mcp.restore(app, &cli_key);
         return Err(err);
     }
 
     if let Err(err) = mcp::sync_cli_for_workspace(app, &conn, workspace_id) {
         let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
         let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
+        prev_mcp.restore(app, &cli_key);
         return Err(err);
     }
 
@@ -303,8 +305,7 @@ pub fn apply<R: tauri::Runtime>(
             Err(err) => {
                 let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
                 let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-                let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-                let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
+                prev_mcp.restore(app, &cli_key);
                 return Err(err);
             }
         }
@@ -315,8 +316,7 @@ pub fn apply<R: tauri::Runtime>(
     if let Err(err) = skills::sync_cli_for_workspace(app, &conn, workspace_id) {
         let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
         let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
+        prev_mcp.restore(app, &cli_key);
 
         if let Some(swap) = local_plugins_swap.take() {
             swap.rollback();
@@ -340,8 +340,7 @@ pub fn apply<R: tauri::Runtime>(
         Err(err) => {
             let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
             let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-            let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-            let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
+            prev_mcp.restore(app, &cli_key);
 
             if let Some(swap) = local_plugins_swap.take() {
                 swap.rollback();
@@ -358,8 +357,7 @@ pub fn apply<R: tauri::Runtime>(
     if let Err(err) = workspaces::set_active(&conn, workspace_id) {
         let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
         let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
+        prev_mcp.restore(app, &cli_key);
 
         local_skills_swap.rollback();
 

@@ -243,7 +243,7 @@ where
         // The stream handler already handles cx2cc translation via BridgeStream,
         // and the non-stream handler can still synthesize SSE from buffered JSON
         // when the upstream returns a non-SSE response.
-        if is_event_stream(&response_headers) {
+        if prepared.gemini_catalog_policy.is_none() && is_event_stream(&response_headers) {
             return success_event_stream::handle_success_event_stream(
                 ctx,
                 provider_ctx,
@@ -256,6 +256,10 @@ where
             .await;
         }
         return success_non_stream::handle_success_non_stream(
+            prepared
+                .gemini_catalog_policy
+                .as_ref()
+                .filter(|_| prepared.oauth_adapter.is_none()),
             ctx,
             provider_ctx,
             attempt_ctx,

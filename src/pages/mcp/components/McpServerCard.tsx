@@ -8,19 +8,21 @@ import { Switch } from "../../../ui/Switch";
 export type McpServerCardProps = {
   server: McpServerSummary;
   toggling: boolean;
+  unsupportedTransport?: boolean;
   onToggleEnabled: (server: McpServerSummary) => void;
   onEdit: (server: McpServerSummary) => void;
   onDelete: (server: McpServerSummary) => void;
 };
 
 function describeServer(server: Pick<McpServerSummary, "transport" | "command" | "url">) {
-  if (server.transport === "http") return server.url || "（未填写 url）";
+  if (server.transport !== "stdio") return server.url || "（未填写 url）";
   return server.command || "（未填写 command）";
 }
 
 export const McpServerCard = memo(function McpServerCard({
   server,
   toggling,
+  unsupportedTransport,
   onToggleEnabled,
   onEdit,
   onDelete,
@@ -32,7 +34,7 @@ export const McpServerCard = memo(function McpServerCard({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-4 min-w-0">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground ring-1 ring-border dark:ring-border">
-            {server.transport === "http" ? (
+            {server.transport !== "stdio" ? (
               <Globe className="h-6 w-6" />
             ) : (
               <Terminal className="h-6 w-6" />
@@ -54,7 +56,7 @@ export const McpServerCard = memo(function McpServerCard({
                 className="flex items-center gap-1 truncate max-w-[200px] sm:max-w-xs"
                 title={serverDescription}
               >
-                {server.transport === "http" ? (
+                {server.transport !== "stdio" ? (
                   <Link className="h-3 w-3 shrink-0" />
                 ) : (
                   <Command className="h-3 w-3 shrink-0" />
@@ -70,12 +72,16 @@ export const McpServerCard = memo(function McpServerCard({
             <div className="flex items-center gap-2">
               <Switch
                 checked={server.enabled}
-                disabled={toggling}
+                disabled={toggling || (unsupportedTransport && !server.enabled)}
                 onCheckedChange={() => onToggleEnabled(server)}
                 className="scale-90"
               />
               <span className="text-xs font-medium text-muted-foreground">
-                {server.enabled ? "已启用" : "未启用"}
+                {unsupportedTransport
+                  ? "Antigravity 仅支持 stdio 和 Streamable HTTP"
+                  : server.enabled
+                    ? "已启用"
+                    : "未启用"}
               </span>
             </div>
           </div>

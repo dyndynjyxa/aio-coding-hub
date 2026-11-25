@@ -339,6 +339,9 @@ pub fn config_import<R: tauri::Runtime>(
     let previous_settings = settings::read(app)?;
     let mut settings_to_write: settings::AppSettings = serde_json::from_str(&settings)
         .map_err(|e| format!("SEC_INVALID_INPUT: invalid settings bundle: {e}"))?;
+    // A bundle can opt out, but only this installation can grant permission
+    // to redirect Antigravity sessions (older Gemini bundles selected .env).
+    settings_to_write.wsl_target_cli.gemini &= previous_settings.wsl_target_cli.gemini;
     settings_to_write.schema_version = settings::SCHEMA_VERSION;
     let runtime_backups = rollback::capture_cli_runtime_backups(app)?;
 
@@ -404,7 +407,7 @@ pub fn config_import<R: tauri::Runtime>(
         return Err(err);
     }
 
-    if let Err(err) = rollback::sync_all_cli_runtime(app, &tx) {
+    if let Err(err) = rollback::sync_all_cli_runtime(app, &tx, &runtime_backups) {
         drop(tx);
         rollback::rollback_after_failed_import(
             app,

@@ -59,6 +59,7 @@ macro_rules! generated_command_registry {
             cli_manager_gemini_info_get => crate::commands::cli_manager::cli_manager_gemini_info_get,
             cli_manager_gemini_config_get => crate::commands::cli_manager::cli_manager_gemini_config_get,
             cli_manager_gemini_config_set => crate::commands::cli_manager::cli_manager_gemini_config_set,
+            cli_manager_gemini_models_list => crate::commands::cli_manager::cli_manager_gemini_models_list,
             cli_manager_grok_info_get => crate::commands::cli_manager::cli_manager_grok_info_get,
             cli_manager_grok_config_get => crate::commands::cli_manager::cli_manager_grok_config_get,
             cli_manager_grok_config_set => crate::commands::cli_manager::cli_manager_grok_config_set,

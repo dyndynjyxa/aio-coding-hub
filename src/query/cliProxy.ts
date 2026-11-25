@@ -72,8 +72,13 @@ export function useCliProxySetEnabledMutation() {
     },
     onSettled: (_data, _error, input) => {
       queryClient.invalidateQueries({ queryKey: cliProxyKeys.statusAll() });
-      if (input.cliKey.trim() === "grok") {
+      const cliKey = input.cliKey.trim();
+      if (cliKey === "grok") {
         queryClient.invalidateQueries({ queryKey: cliManagerKeys.grokConfig() });
+      }
+      if (cliKey === "gemini") {
+        // The gateway takeover swaps the model list agy reports.
+        queryClient.invalidateQueries({ queryKey: cliManagerKeys.geminiModels() });
       }
     },
   });

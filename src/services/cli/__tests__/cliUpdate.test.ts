@@ -58,7 +58,7 @@ describe("services/cli/cliUpdate", () => {
       status: "ok",
       data: {
         cliKey: "claude",
-        npmPackage: "@anthropic-ai/claude-code",
+        packageName: "@anthropic-ai/claude-code",
         installedVersion: "1.0.0",
         latestVersion: "1.1.0",
         updateAvailable: true,
@@ -87,7 +87,7 @@ describe("services/cli/cliUpdate", () => {
       status: "ok",
       data: {
         cliKey: " gemini ",
-        npmPackage: "  @google/gemini-cli  ",
+        packageName: "  google-antigravity/antigravity-cli  ",
         installedVersion: "  1.0.0  ",
         latestVersion: "  1.1.0  ",
         updateAvailable: true,
@@ -106,7 +106,7 @@ describe("services/cli/cliUpdate", () => {
 
     await expect(cliCheckLatestVersion("gemini")).resolves.toEqual({
       cliKey: "gemini",
-      npmPackage: "@google/gemini-cli",
+      packageName: "google-antigravity/antigravity-cli",
       installedVersion: "1.0.0",
       latestVersion: "1.1.0",
       updateAvailable: true,
@@ -136,7 +136,7 @@ describe("services/cli/cliUpdate", () => {
       status: "ok",
       data: {
         cliKey: "claude",
-        npmPackage: "@anthropic-ai/claude-code",
+        packageName: "@anthropic-ai/claude-code",
         installedVersion: null,
         latestVersion: "1.1.0",
         updateAvailable: "yes" as any,

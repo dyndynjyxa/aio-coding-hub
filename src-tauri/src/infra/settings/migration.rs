@@ -711,9 +711,22 @@ fn migrate_add_codex_responses_websocket(
     )
 }
 
+fn migrate_agy_wsl_gateway(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    if !migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_AGY_WSL_GATEWAY,
+    ) {
+        return false;
+    }
+    // The old selection only authorized Gemini CLI's .env. Antigravity shares its gateway across clients.
+    settings.wsl_target_cli.gemini = false;
+    true
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 32] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 33] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -746,6 +759,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 32] = [
     migrate_add_image_gen_storage_dir,
     migrate_align_cch_gateway_rectifiers,
     migrate_add_codex_responses_websocket,
+    migrate_agy_wsl_gateway,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -1385,6 +1399,27 @@ mod tests {
             SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR
         );
         assert_eq!(settings.image_gen_storage_dir, None);
+    }
+
+    #[test]
+    fn legacy_wsl_target_does_not_enable_agy_gateway() {
+        assert!(!AppSettings::default().wsl_target_cli.gemini);
+        for (json, has_version) in [
+            (
+                serde_json::json!({"schema_version":38, "wsl_target_cli":{"gemini":true}}),
+                true,
+            ),
+            (serde_json::json!({"wsl_target_cli":{"gemini":true}}), false),
+            (serde_json::json!({"schema_version":38}), true),
+        ] {
+            let mut settings: AppSettings = serde_json::from_value(json).unwrap();
+            assert!(apply_settings_migrations(&mut settings, has_version));
+            assert!(!settings.wsl_target_cli.gemini);
+            assert!(settings.wsl_target_cli.claude && settings.wsl_target_cli.codex);
+            settings.wsl_target_cli.gemini = true;
+            assert!(!apply_settings_migrations(&mut settings, true));
+            assert!(settings.wsl_target_cli.gemini);
+        }
     }
 
     #[test]

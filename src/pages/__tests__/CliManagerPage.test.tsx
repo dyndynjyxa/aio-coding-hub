@@ -31,6 +31,7 @@ import {
   useCliManagerCodexModelCatalogRefresh,
   useCliManagerGeminiConfigQuery,
   useCliManagerGeminiConfigSetMutation,
+  useCliManagerGeminiModelsQuery,
   useCliManagerGeminiInfoQuery,
 } from "../../query/cliManager";
 import { useProvidersListQuery } from "../../query/providers";
@@ -163,7 +164,10 @@ vi.mock("../../components/cli-manager/tabs/GeminiTab", () => ({
       <button type="button" onClick={() => refreshGeminiInfo()}>
         refresh-gemini
       </button>
-      <button type="button" onClick={() => persistGeminiConfig?.({ modelName: "gemini-2.5-pro" })}>
+      <button
+        type="button"
+        onClick={() => persistGeminiConfig?.({ model: "Gemini 4 Neon (High)" })}
+      >
         save-gemini
       </button>
     </div>
@@ -208,6 +212,7 @@ vi.mock("../../query/cliManager", async () => {
     useCliManagerCodexModelCatalogRefresh: vi.fn(),
     useCliManagerGeminiConfigQuery: vi.fn(),
     useCliManagerGeminiConfigSetMutation: vi.fn(),
+    useCliManagerGeminiModelsQuery: vi.fn(),
     useCliManagerGeminiInfoQuery: vi.fn(),
   };
 });
@@ -331,6 +336,13 @@ beforeEach(() => {
 
   vi.mocked(useCliManagerGeminiConfigQuery).mockReturnValue({
     data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+
+  vi.mocked(useCliManagerGeminiModelsQuery).mockReturnValue({
+    data: null,
+    isError: false,
     isFetching: false,
     refetch: vi.fn(),
   } as any);
@@ -832,6 +844,48 @@ describe("pages/CliManagerPage", () => {
     expect(await screen.findByText("gemini-tab")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "refresh-gemini" }));
     await waitFor(() => expect(geminiInfoRefetch).toHaveBeenCalled());
+  });
+
+  it("refreshes the Gemini model list only when agy is installed", async () => {
+    const modelsRefetch = vi.fn().mockResolvedValue({ data: [] });
+    vi.mocked(useCliManagerGeminiModelsQuery).mockReturnValue({
+      data: null,
+      isError: false,
+      isFetching: false,
+      refetch: modelsRefetch,
+    } as any);
+    const geminiInfoRefetch = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(useCliManagerGeminiInfoQuery).mockReturnValue({
+      data: { found: false },
+      isFetching: false,
+      refetch: geminiInfoRefetch,
+    } as any);
+
+    const { rerender, client } = renderWithProviders(<CliManagerPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "Gemini" }));
+    expect(await screen.findByText("gemini-tab")).toBeInTheDocument();
+    expect(vi.mocked(useCliManagerGeminiModelsQuery)).toHaveBeenLastCalledWith({ enabled: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-gemini" }));
+    await waitFor(() => expect(geminiInfoRefetch).toHaveBeenCalledTimes(1));
+    expect(modelsRefetch).not.toHaveBeenCalled();
+
+    vi.mocked(useCliManagerGeminiInfoQuery).mockReturnValue({
+      data: { found: true },
+      isFetching: false,
+      refetch: geminiInfoRefetch,
+    } as any);
+    rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <CliManagerPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    expect(vi.mocked(useCliManagerGeminiModelsQuery)).toHaveBeenLastCalledWith({ enabled: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-gemini" }));
+    await waitFor(() => expect(modelsRefetch).toHaveBeenCalledTimes(1));
   });
 
   it("skips persisting when mutations are pending", async () => {
@@ -1403,7 +1457,7 @@ describe("pages/CliManagerPage", () => {
       refetch: vi.fn(),
     } as any);
     vi.mocked(useCliManagerGeminiConfigQuery).mockReturnValue({
-      data: { modelName: "gemini-2.5-pro" },
+      data: { model: "Gemini 3.8 Flash (Low)" },
       isFetching: false,
       refetch: vi.fn(),
     } as any);
@@ -1449,7 +1503,7 @@ describe("pages/CliManagerPage", () => {
       "更新 Gemini 配置失败",
       expect.objectContaining({
         error_code: "GEMINI_DENIED",
-        patch: { modelName: "gemini-2.5-pro" },
+        patch: { model: "Gemini 4 Neon (High)" },
       })
     );
   });

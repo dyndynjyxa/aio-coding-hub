@@ -359,6 +359,14 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async cliManagerGeminiModelsList(): Promise<Result<GeminiModelOption[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_gemini_models_list") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async cliManagerGrokInfoGet(): Promise<Result<SimpleCliInfo, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("cli_manager_grok_info_get") };
@@ -2590,7 +2598,10 @@ export type CliUpdateResult = {
 };
 export type CliVersionCheck = {
   cliKey: string;
-  npmPackage: string;
+  /**
+   * npm package, or the GitHub repo whose releases a self-updating CLI follows.
+   */
+  packageName: string;
   installedVersion: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
@@ -2940,51 +2951,45 @@ export type GatewayUpstreamProxyInput = {
   proxyUsername: string | null;
   proxyPassword: string | null;
 };
+/**
+ * `None`/`null` leaves a key untouched; an empty string removes it (CLI default).
+ */
 export type GeminiConfigPatch = {
-  modelName: string | null;
-  modelMaxSessionTurns?: number | null;
-  modelCompressionThreshold?: number | null;
-  defaultApprovalMode: string | null;
-  enableAutoUpdate?: boolean | null;
-  enableNotifications?: boolean | null;
-  vimMode?: boolean | null;
-  retryFetchErrors?: boolean | null;
-  maxAttempts?: number | null;
-  uiTheme: string | null;
-  uiHideBanner?: boolean | null;
-  uiHideTips?: boolean | null;
-  uiShowLineNumbers?: boolean | null;
-  uiInlineThinkingMode: string | null;
-  usageStatisticsEnabled?: boolean | null;
-  sessionRetentionEnabled?: boolean | null;
-  sessionRetentionMaxAge: string | null;
-  planModelRouting?: boolean | null;
-  securityAuthSelectedType: string | null;
+  model: string | null;
+  agentMode: string | null;
+  toolPermission: string | null;
+  artifactReviewPolicy: string | null;
+  enableTerminalSandbox: boolean | null;
+  allowNonWorkspaceAccess: boolean | null;
+  colorScheme: string | null;
+  altScreenMode: string | null;
+  verbosity: string | null;
+  editorMode: string | null;
+  notifications: boolean | null;
+  showTips: boolean | null;
 };
 export type GeminiConfigState = {
   configDir: string;
   configPath: string;
   exists: boolean;
-  modelName: string | null;
-  modelMaxSessionTurns: number | null;
-  modelCompressionThreshold: number | null;
-  defaultApprovalMode: string | null;
-  enableAutoUpdate: boolean | null;
-  enableNotifications: boolean | null;
-  vimMode: boolean | null;
-  retryFetchErrors: boolean | null;
-  maxAttempts: number | null;
-  uiTheme: string | null;
-  uiHideBanner: boolean | null;
-  uiHideTips: boolean | null;
-  uiShowLineNumbers: boolean | null;
-  uiInlineThinkingMode: string | null;
-  usageStatisticsEnabled: boolean | null;
-  sessionRetentionEnabled: boolean | null;
-  sessionRetentionMaxAge: string | null;
-  planModelRouting: boolean | null;
-  securityAuthSelectedType: string | null;
+  model: string | null;
+  agentMode: string | null;
+  toolPermission: string | null;
+  artifactReviewPolicy: string | null;
+  enableTerminalSandbox: boolean | null;
+  allowNonWorkspaceAccess: boolean | null;
+  colorScheme: string | null;
+  altScreenMode: string | null;
+  verbosity: string | null;
+  editorMode: string | null;
+  notifications: boolean | null;
+  showTips: boolean | null;
 };
+/**
+ * One entry of `agy models`: `id` is accepted by `--model`, `label` is what
+ * `settings.json` `model` must hold (agy ignores an id there).
+ */
+export type GeminiModelOption = { id: string; label: string };
 export type GrokApiBackend = "responses" | "chat_completions";
 export type GrokConfigState = {
   config_path: string;

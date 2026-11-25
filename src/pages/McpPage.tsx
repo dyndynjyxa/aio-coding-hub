@@ -61,7 +61,7 @@ export function McpPage() {
             未找到 {cliLabel} 的当前工作区（workspace）。请先在 Workspaces 页面创建并设为当前。
           </div>
         ) : (
-          <McpServersView workspaceId={activeWorkspaceId} />
+          <McpServersView workspaceId={activeWorkspaceId} cliKey={effectiveCli} />
         )}
       </div>
     </div>

@@ -1,5 +1,8 @@
 //! Usage: Small filesystem helpers shared across infra adapters (atomic writes, optional reads).
 
+mod private;
+pub(crate) use private::{regular_file_metadata, write_private_file_atomic};
+
 use std::path::Path;
 
 const WRITE_IF_CHANGED_COMPARE_MAX_BYTES: usize = 16 * 1024 * 1024;

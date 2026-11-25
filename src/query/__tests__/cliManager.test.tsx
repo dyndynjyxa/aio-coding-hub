@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import {
+  type GeminiConfigState,
   type ClaudeCliInfo,
   type ClaudeHooksState,
   type ClaudeSettingsState,
@@ -10,6 +11,9 @@ import {
   type CodexModelCatalogState,
   type SimpleCliInfo,
   type GrokConfigState,
+  cliManagerGeminiConfigGet,
+  cliManagerGeminiConfigSet,
+  cliManagerGeminiModelsList,
   cliManagerClaudeHooksGet,
   cliManagerClaudeHooksSet,
   cliManagerClaudeInfoGet,
@@ -31,6 +35,9 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { cliManagerKeys } from "../keys";
 import {
   pickCliAvailable,
+  useCliManagerGeminiConfigQuery,
+  useCliManagerGeminiConfigSetMutation,
+  useCliManagerGeminiModelsQuery,
   useCliManagerClaudeHooksQuery,
   useCliManagerClaudeHooksSetMutation,
   useCliManagerClaudeInfoQuery,
@@ -55,6 +62,9 @@ vi.mock("../../services/cli/cliManager", async () => {
   );
   return {
     ...actual,
+    cliManagerGeminiConfigGet: vi.fn(),
+    cliManagerGeminiConfigSet: vi.fn(),
+    cliManagerGeminiModelsList: vi.fn(),
     cliManagerClaudeInfoGet: vi.fn(),
     cliManagerClaudeHooksGet: vi.fn(),
     cliManagerClaudeHooksSet: vi.fn(),
@@ -72,6 +82,27 @@ vi.mock("../../services/cli/cliManager", async () => {
     cliManagerGrokConfigSet: vi.fn(),
   };
 });
+
+function makeGeminiConfigState(overrides: Partial<GeminiConfigState> = {}): GeminiConfigState {
+  return {
+    configDir: "/tmp/.gemini/antigravity-cli",
+    configPath: "/tmp/.gemini/antigravity-cli/settings.json",
+    exists: true,
+    model: null,
+    agentMode: null,
+    toolPermission: null,
+    artifactReviewPolicy: null,
+    enableTerminalSandbox: null,
+    allowNonWorkspaceAccess: null,
+    colorScheme: null,
+    altScreenMode: null,
+    verbosity: null,
+    editorMode: null,
+    notifications: null,
+    showTips: null,
+    ...overrides,
+  };
+}
 
 function makeSimpleCliInfo(overrides: Partial<SimpleCliInfo> = {}): SimpleCliInfo {
   return {
@@ -423,6 +454,70 @@ describe("query/cliManager", () => {
 
     expect(client.getQueryData(cliManagerKeys.grokConfig())).toEqual(updated);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.grokConfig() });
+  });
+
+  it("agy config and model queries load, and respect enabled=false", async () => {
+    setTauriRuntime();
+    vi.mocked(cliManagerGeminiConfigGet).mockResolvedValue(makeGeminiConfigState());
+    vi.mocked(cliManagerGeminiModelsList).mockResolvedValue([
+      { id: "gemini-4-neon-high", label: "Gemini 4 Neon (High)" },
+    ]);
+
+    const wrapper = createQueryWrapper(createTestQueryClient());
+    renderHook(() => useCliManagerGeminiConfigQuery({ enabled: false }), { wrapper });
+    renderHook(() => useCliManagerGeminiModelsQuery({ enabled: false }), { wrapper });
+    await Promise.resolve();
+    expect(cliManagerGeminiConfigGet).not.toHaveBeenCalled();
+    expect(cliManagerGeminiModelsList).not.toHaveBeenCalled();
+
+    const config = renderHook(() => useCliManagerGeminiConfigQuery(), { wrapper });
+    const models = renderHook(() => useCliManagerGeminiModelsQuery(), { wrapper });
+    await waitFor(() => {
+      expect(config.result.current.data?.configPath).toBe(
+        "/tmp/.gemini/antigravity-cli/settings.json"
+      );
+      expect(models.result.current.data).toEqual([
+        { id: "gemini-4-neon-high", label: "Gemini 4 Neon (High)" },
+      ]);
+    });
+  });
+
+  it("useCliManagerGeminiModelsQuery surfaces a missing agy as error", async () => {
+    setTauriRuntime();
+    vi.mocked(cliManagerGeminiModelsList).mockRejectedValue(new Error("CLI_NOT_FOUND: agy"));
+
+    const wrapper = createQueryWrapper(createTestQueryClient());
+    const { result } = renderHook(() => useCliManagerGeminiModelsQuery(), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+
+  it("useCliManagerGeminiConfigSetMutation updates cache, and keeps it on failure", async () => {
+    setTauriRuntime();
+    const before = makeGeminiConfigState();
+    const updated = makeGeminiConfigState({ model: "Gemini 4 Neon (High)" });
+    vi.mocked(cliManagerGeminiConfigSet)
+      .mockResolvedValueOnce(updated)
+      .mockRejectedValueOnce(new Error("SEC_INVALID_INPUT: unsupported toolPermission=yolo"));
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.geminiConfig(), before);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useCliManagerGeminiConfigSetMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ model: "Gemini 4 Neon (High)" });
+    });
+    expect(cliManagerGeminiConfigSet).toHaveBeenCalledWith({ model: "Gemini 4 Neon (High)" });
+    expect(client.getQueryData(cliManagerKeys.geminiConfig())).toEqual(updated);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.geminiConfig() });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync({ toolPermission: "yolo" })).rejects.toThrow(
+        "unsupported toolPermission"
+      );
+    });
+    expect(client.getQueryData(cliManagerKeys.geminiConfig())).toEqual(updated);
   });
 
   it("useCliManagerClaudeSettingsSetMutation updates cache and invalidates", async () => {

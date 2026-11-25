@@ -21,7 +21,7 @@ describe("components/cli-manager/CliVersionBadge", () => {
   it("shows up-to-date state", async () => {
     vi.mocked(cliCheckLatestVersion).mockResolvedValue({
       cliKey: "gemini",
-      npmPackage: "@google/gemini-cli",
+      packageName: "google-antigravity/antigravity-cli",
       installedVersion: "1.0.0",
       latestVersion: "1.0.0",
       updateAvailable: false,
@@ -39,7 +39,7 @@ describe("components/cli-manager/CliVersionBadge", () => {
     vi.mocked(cliCheckLatestVersion)
       .mockResolvedValueOnce({
         cliKey: "codex",
-        npmPackage: "@openai/codex",
+        packageName: "@openai/codex",
         installedVersion: "1.0.0",
         latestVersion: "1.1.0",
         updateAvailable: true,
@@ -47,7 +47,7 @@ describe("components/cli-manager/CliVersionBadge", () => {
       })
       .mockResolvedValueOnce({
         cliKey: "codex",
-        npmPackage: "@openai/codex",
+        packageName: "@openai/codex",
         installedVersion: "1.1.0",
         latestVersion: "1.1.0",
         updateAvailable: false,
@@ -80,7 +80,7 @@ describe("components/cli-manager/CliVersionBadge", () => {
   it("reruns latest-version check when refresh token changes", async () => {
     vi.mocked(cliCheckLatestVersion).mockResolvedValue({
       cliKey: "gemini",
-      npmPackage: "@google/gemini-cli",
+      packageName: "google-antigravity/antigravity-cli",
       installedVersion: "1.0.0",
       latestVersion: "1.0.0",
       updateAvailable: false,

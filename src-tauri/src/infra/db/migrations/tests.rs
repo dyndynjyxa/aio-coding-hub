@@ -1592,6 +1592,42 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
 }
 
 #[test]
+fn antigravity_ensure_disables_only_gemini_sse_workspace_links() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    apply_migrations(&mut conn).unwrap();
+    conn.execute_batch(r#"
+        INSERT INTO mcp_servers (name, normalized_name, server_key, transport, headers_json, created_at, updated_at)
+        VALUES ('sse','sse','sse','sse','{"X-Private":"value"}',1,1), ('http','http','http','http','{}',1,1);
+        INSERT INTO workspace_mcp_enabled (workspace_id,server_id,created_at,updated_at)
+        SELECT w.id, s.id, 1, 1 FROM workspaces w CROSS JOIN mcp_servers s WHERE w.cli_key IN ('gemini','claude');
+    "#).unwrap();
+    apply_migrations(&mut conn).unwrap();
+    apply_migrations(&mut conn).unwrap();
+    let mut stmt = conn.prepare("SELECT w.cli_key,s.transport FROM workspace_mcp_enabled e JOIN workspaces w ON w.id=e.workspace_id JOIN mcp_servers s ON s.id=e.server_id ORDER BY 1,2").unwrap();
+    let enabled: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        enabled,
+        vec![
+            ("claude".into(), "http".into()),
+            ("claude".into(), "sse".into()),
+            ("gemini".into(), "http".into())
+        ]
+    );
+    let headers: String = conn
+        .query_row(
+            "SELECT headers_json FROM mcp_servers WHERE server_key='sse'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(headers, r#"{"X-Private":"value"}"#);
+}
+
+#[test]
 fn ensure_patches_seed_grok_workspace_once_without_resetting_active_workspace() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")

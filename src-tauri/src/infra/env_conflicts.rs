@@ -21,12 +21,14 @@ fn keywords_for_cli(cli_key: &str) -> Vec<&'static str> {
     match cli_key {
         "claude" => vec!["ANTHROPIC"],
         "codex" => vec!["OPENAI"],
-        "gemini" => vec!["GEMINI", "GOOGLE_GEMINI"],
         _ => Vec::new(),
     }
 }
 
 fn variable_matches_cli(cli_key: &str, var_name_upper: &str) -> bool {
+    if cli_key == "gemini" {
+        return var_name_upper.starts_with("AGY_LLM_GATEWAY_");
+    }
     if cli_key == "grok" {
         return matches!(
             var_name_upper,
@@ -137,6 +139,61 @@ fn check_shell_configs<R: tauri::Runtime>(
     Ok(())
 }
 
+fn agy_admin_settings() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("ProgramData")
+            .map(|dir| std::path::PathBuf::from(dir).join("Antigravity/admin_settings.json"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Some("/Library/Application Support/Antigravity/admin_settings.json".into())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Some("/etc/antigravity/admin_settings.json".into())
+    }
+}
+
+fn agy_file_conflicts(
+    home: &std::path::Path,
+    admin: Option<&std::path::Path>,
+    out: &mut Vec<EnvConflict>,
+) -> crate::shared::error::AppResult<()> {
+    let user_path = home.join(".gemini/antigravity-cli/settings.json");
+    for (file, key) in [
+        (admin, "gateway"),
+        (Some(user_path.as_path()), "modelProvider"),
+    ] {
+        let Some(file) = file else { continue };
+        let Some(bytes) =
+            crate::shared::fs::read_optional_file_with_max_len(file, 2 * 1024 * 1024)?
+        else {
+            continue;
+        };
+        let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
+        let conflicting = match serde_json::from_slice::<serde_json::Value>(bytes) {
+            Ok(root) if key == "gateway" => root
+                .get(key)
+                .and_then(|v| v.as_object())
+                .is_some_and(|o| !o.is_empty()),
+            Ok(root) => root
+                .get(key)
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.is_empty() && s != "gateway" && s != "default"),
+            Err(_) => true,
+        };
+        if conflicting {
+            out.push(EnvConflict {
+                var_name: key.into(),
+                source_type: "file".into(),
+                source_path: file.display().to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub fn check_env_conflicts<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -163,8 +220,13 @@ pub fn check_env_conflicts<R: tauri::Runtime>(
         }
     }
 
-    // `app` is only consumed by `check_shell_configs` (non-Windows).
-    let _ = &app;
+    if cli_key == "gemini" {
+        agy_file_conflicts(
+            &crate::app_paths::home_dir(app)?,
+            agy_admin_settings().as_deref(),
+            &mut out,
+        )?;
+    }
 
     #[cfg(not(target_os = "windows"))]
     check_shell_configs(app, cli_key, &mut out, &mut seen)?;
@@ -288,5 +350,30 @@ mod tests {
         for key in ignored {
             assert!(!process_vars.contains(key), "unexpected conflict {key}");
         }
+    }
+}
+
+#[cfg(test)]
+mod agy_tests {
+    use super::*;
+
+    #[test]
+    fn report_only_gateway_overrides_without_their_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let admin = temp.path().join("admin_settings.json");
+        let user = temp.path().join(".gemini/antigravity-cli/settings.json");
+        std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+        std::fs::write(&admin, r#"{"gateway":{"apiKey":"test-secret"}}"#).unwrap();
+        std::fs::write(&user, r#"{"modelProvider":"gemini"}"#).unwrap();
+        let mut out = Vec::new();
+        agy_file_conflicts(temp.path(), Some(&admin), &mut out).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!(!serde_json::to_string(&out).unwrap().contains("test-secret"));
+        assert!(variable_matches_cli("gemini", "AGY_LLM_GATEWAY_URL"));
+        assert!(!variable_matches_cli("gemini", "GEMINI_API_KEY"));
+        std::fs::write(&user, b"\xef\xbb\xbf{}").unwrap();
+        out.clear();
+        agy_file_conflicts(temp.path(), None, &mut out).unwrap();
+        assert!(out.is_empty());
     }
 }

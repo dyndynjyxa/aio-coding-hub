@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 38;
+pub const SCHEMA_VERSION: u32 = 39;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -45,6 +45,7 @@ pub(super) const SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES: u32 = 35;
 pub(super) const SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR: u32 = 36;
 pub(super) const SCHEMA_VERSION_ALIGN_CCH_GATEWAY_RECTIFIERS: u32 = 37;
 pub(super) const SCHEMA_VERSION_ADD_CODEX_RESPONSES_WEBSOCKET: u32 = 38;
+pub(super) const SCHEMA_VERSION_AGY_WSL_GATEWAY: u32 = 39;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;

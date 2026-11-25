@@ -110,7 +110,7 @@ use request_end_helpers::{
 use crate::gateway::proxy::{
     errors::{classify_upstream_status, error_response},
     failover::{retry_backoff_delay, select_provider_base_url_for_request, FailoverDecision},
-    gemini_oauth,
+    gemini_catalog, gemini_oauth,
     http_util::{
         build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
         is_event_stream, maybe_gunzip_response_body_bytes_with_limit,

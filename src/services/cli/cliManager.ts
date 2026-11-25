@@ -1,5 +1,8 @@
 import {
   commands,
+  type GeminiConfigPatch as GeneratedGeminiConfigPatch,
+  type GeminiConfigState as GeneratedGeminiConfigState,
+  type GeminiModelOption as GeneratedGeminiModelOption,
   type ClaudeCliInfo as GeneratedClaudeCliInfo,
   type ClaudeEnvState as GeneratedClaudeEnvState,
   type ClaudeHookGroup as GeneratedClaudeHookGroup,
@@ -15,8 +18,6 @@ import {
   type CodexModelCatalogState as GeneratedCodexModelCatalogState,
   type CodexModelCapability as GeneratedCodexModelCapability,
   type CodexReasoningEffortOption as GeneratedCodexReasoningEffortOption,
-  type GeminiConfigPatch as GeneratedGeminiConfigPatch,
-  type GeminiConfigState as GeneratedGeminiConfigState,
   type GrokApiBackend as GeneratedGrokApiBackend,
   type GrokConfigState as GeneratedGrokConfigState,
   type GrokProxyPreferences as GeneratedGrokProxyPreferences,
@@ -42,6 +43,7 @@ export type CodexModelCapability = GeneratedCodexModelCapability;
 export type CodexReasoningEffortOption = GeneratedCodexReasoningEffortOption;
 export type GeminiConfigState = GeneratedGeminiConfigState;
 export type GeminiConfigPatch = Partial<GeneratedGeminiConfigPatch>;
+export type GeminiModelOption = GeneratedGeminiModelOption;
 export type GrokApiBackend = GeneratedGrokApiBackend;
 export type GrokConfigState = GeneratedGrokConfigState;
 export type GrokProxyPreferences = GeneratedGrokProxyPreferences;
@@ -71,26 +73,20 @@ const DEFAULT_CODEX_CONFIG_PATCH = {
   features_multi_agent: null,
 } satisfies GeneratedCodexConfigPatch;
 
+// null leaves a key untouched; "" removes it so agy falls back to its default.
 const DEFAULT_GEMINI_CONFIG_PATCH = {
-  modelName: null,
-  modelMaxSessionTurns: null,
-  modelCompressionThreshold: null,
-  defaultApprovalMode: null,
-  enableAutoUpdate: null,
-  enableNotifications: null,
-  vimMode: null,
-  retryFetchErrors: null,
-  maxAttempts: null,
-  uiTheme: null,
-  uiHideBanner: null,
-  uiHideTips: null,
-  uiShowLineNumbers: null,
-  uiInlineThinkingMode: null,
-  usageStatisticsEnabled: null,
-  sessionRetentionEnabled: null,
-  sessionRetentionMaxAge: null,
-  planModelRouting: null,
-  securityAuthSelectedType: null,
+  model: null,
+  agentMode: null,
+  toolPermission: null,
+  artifactReviewPolicy: null,
+  enableTerminalSandbox: null,
+  allowNonWorkspaceAccess: null,
+  colorScheme: null,
+  altScreenMode: null,
+  verbosity: null,
+  editorMode: null,
+  notifications: null,
+  showTips: null,
 } satisfies GeneratedGeminiConfigPatch;
 
 const DEFAULT_CLAUDE_SETTINGS_PATCH = {
@@ -264,6 +260,15 @@ export async function cliManagerGeminiConfigSet(patch: GeminiConfigPatch) {
       commands.cliManagerGeminiConfigSet(normalizedPatch) as Promise<
         GeneratedCommandResult<GeminiConfigState>
       >,
+  });
+}
+
+export async function cliManagerGeminiModelsList() {
+  return invokeGeneratedIpc<GeminiModelOption[]>({
+    title: "读取 Gemini 模型列表失败",
+    cmd: "cli_manager_gemini_models_list",
+    invoke: () =>
+      commands.cliManagerGeminiModelsList() as Promise<GeneratedCommandResult<GeminiModelOption[]>>,
   });
 }
 

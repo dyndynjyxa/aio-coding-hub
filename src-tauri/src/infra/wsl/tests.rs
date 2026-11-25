@@ -295,6 +295,129 @@ mod tests {
     }
 
     #[test]
+    fn malformed_wsl_mcp_journal_blocks_only_gemini_migration() {
+        let _guard = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = ScopedEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let app = tauri::test::mock_app();
+        for cli in ["claude", "codex", "gemini"] {
+            let path = crate::app_paths::app_data_dir(app.handle())
+                .unwrap()
+                .join("wsl-mcp-sync/test")
+                .join(cli)
+                .join("manifest.json");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"invalid JSON").unwrap();
+            let result = crate::wsl::mcp_sync::sync_wsl_mcp_for_cli(app.handle(), "test", cli, &[]);
+            if cli == "gemini" {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("manifest is invalid"));
+            } else {
+                assert_eq!(result.unwrap(), None);
+            }
+            assert_eq!(std::fs::read(&path).unwrap(), b"invalid JSON");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_wsl_mcp_migrates_only_owned_keys_and_takes_over_same_names() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let _home = ScopedEnvVar::set("AIO_CODING_HUB_TEST_HOME", home);
+        let fake_wsl = home.join("wsl");
+        // Execute the real WSL file scripts against a synthetic passwd entry.
+        // BSD base64 lacks GNU's -w0 option for encoding.
+        std::fs::write(
+            &fake_wsl,
+            r#"#!/bin/bash
+[[ "$1 $2 $3" == "-d aio-mcp-test bash" ]] || exit 40
+getent() { printf 'tester:x:1:1::%s:/bin/bash\n' "$AIO_CODING_HUB_TEST_HOME"; }
+base64() {
+  if [[ "$1" == -w0 ]]; then command base64 < "$2" | tr -d '\n'; else command base64 "$@"; fi
+}
+. /dev/stdin
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_wsl, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let old_path = std::env::var_os("PATH").unwrap();
+        let _path = ScopedEnvVar::set(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(home.to_owned()).chain(std::env::split_paths(&old_path)),
+            )
+            .unwrap(),
+        );
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let manifest = crate::app_paths::app_data_dir(handle)
+            .unwrap()
+            .join("wsl-mcp-sync/aio-mcp-test/gemini/manifest.json");
+        let old = home.join(".gemini/settings.json");
+        let new = home.join(".gemini/config/mcp_config.json");
+        for p in [&manifest, &new] {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        }
+        let record = br#"{"distro":"aio-mcp-test","cli_key":"gemini","managed_keys":["test"],"updated_at":0}"#;
+        let source = br#"{"theme":"dark","mcpServers":{"test":{"command":"aio"},"manual":{"command":"keep"}}}"#;
+        std::fs::write(&manifest, record).unwrap();
+        std::fs::write(&old, source).unwrap();
+        std::fs::write(&new, br#"{"mcpServers":{"test":{"command":"local"},"same":{"command":"aio","oauth":{"scope":"mine"}}}}"#).unwrap();
+        let server = make_server(Some("aio"), vec![], None, vec![]);
+        let desired = [
+            server.clone(),
+            McpServerForSync {
+                server_key: "second".into(),
+                ..server.clone()
+            },
+            McpServerForSync {
+                server_key: "same".into(),
+                ..server
+            },
+        ];
+        let sync = |servers: &[McpServerForSync]| {
+            crate::wsl::mcp_sync::sync_wsl_mcp_for_cli(handle, "aio-mcp-test", "gemini", servers)
+        };
+        let synced = sync(&desired).unwrap().unwrap();
+        assert_eq!(synced.count, 3);
+        assert!(!synced.legacy_cleanup_skipped);
+        let read_json = |p: &std::path::Path| {
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(p).unwrap()).unwrap()
+        };
+        assert_eq!(
+            read_json(&old),
+            serde_json::json!({"theme":"dark","mcpServers":{"manual":{"command":"keep"}}})
+        );
+        assert_eq!(read_json(&manifest)["target"], "antigravity");
+        assert_eq!(
+            read_json(&manifest)["managed_keys"],
+            serde_json::json!(["same", "second", "test"])
+        );
+        // Same-name local entries are taken over; agy-native options survive.
+        assert_eq!(
+            read_json(&new),
+            serde_json::json!({"mcpServers":{
+                "test":{"command":"aio"},
+                "same":{"command":"aio","oauth":{"scope":"mine"}},
+                "second":{"command":"aio"}}})
+        );
+        assert_eq!(sync(&[]).unwrap().unwrap().count, 0);
+        assert_eq!(read_json(&new), serde_json::json!({"mcpServers":{}}));
+        std::fs::write(&manifest, record).unwrap();
+        std::fs::write(&old, b"invalid old JSONC").unwrap();
+        let retry = sync(&desired).unwrap().unwrap();
+        assert!(retry.legacy_cleanup_skipped);
+        assert_eq!(retry.count, 3);
+        assert_eq!(std::fs::read(&old).unwrap(), b"invalid old JSONC");
+        assert_eq!(read_json(&new)["mcpServers"]["second"]["command"], "aio");
+    }
+
+    #[test]
     fn read_wsl_manifest_rejects_oversized_file() {
         let result = (|| -> crate::shared::error::AppResult<()> {
             let _guard = crate::test_support::test_env_lock();
@@ -416,37 +539,6 @@ model = "o3"
                 Some("profile-only")
             );
         }
-    }
-
-    #[test]
-    fn test_extract_env_value() {
-        let content = r#"
-# comment line
-GOOGLE_GEMINI_BASE_URL=http://localhost:1234/gemini
-GEMINI_API_KEY=aio-coding-hub
-OTHER_VAR=keep
-"#;
-        assert_eq!(
-            crate::wsl::manifest::extract_env_value(content, "GOOGLE_GEMINI_BASE_URL"),
-            Some("http://localhost:1234/gemini".to_string())
-        );
-        assert_eq!(
-            crate::wsl::manifest::extract_env_value(content, "GEMINI_API_KEY"),
-            Some("aio-coding-hub".to_string())
-        );
-        assert_eq!(
-            crate::wsl::manifest::extract_env_value(content, "MISSING"),
-            None
-        );
-    }
-
-    #[test]
-    fn test_extract_env_value_with_export() {
-        let content = "export GEMINI_API_KEY=my-key\n";
-        assert_eq!(
-            crate::wsl::manifest::extract_env_value(content, "GEMINI_API_KEY"),
-            Some("my-key".to_string())
-        );
     }
 
     #[test]
@@ -627,5 +719,29 @@ CREATE TABLE workspace_skill_enabled (
         })();
 
         result.expect("gather skills sync data");
+    }
+
+    #[test]
+    fn wsl_exit_retains_only_entries_still_needing_restore() {
+        let _guard = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = ScopedEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path().as_os_str());
+        let app = tauri::test::mock_app();
+        let home = temp.path().join("distro");
+        let manifest: WslDistroManifest = serde_json::from_value(serde_json::json!({
+            "schema_version":1,"distro":"Ubuntu","configured":true,"proxy_origin":"http://127.0.0.1:1",
+            "configured_at":1,"wsl_home_unc":home,
+            "cli_backups":[
+                {"cli_key":"claude","injected_keys":{},"original_values":{}},
+                {"cli_key":"gemini","injected_keys":{"GEMINI_API_KEY":"local"},"original_values":{"GEMINI_API_KEY":null}}
+            ]
+        })).unwrap();
+        crate::wsl::manifest::write_wsl_manifest(app.handle(), "Ubuntu", &manifest).unwrap();
+        crate::wsl::restore_wsl_clients(app.handle()).unwrap();
+        let saved = crate::wsl::manifest::read_wsl_manifest(app.handle(), "Ubuntu")
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.cli_backups.len(), 1);
+        assert_eq!(saved.cli_backups[0].cli_key, "gemini");
     }
 }

@@ -13,6 +13,7 @@ import {
   cliManagerCodexModelCatalogGet,
   cliManagerGeminiConfigGet,
   cliManagerGeminiConfigSet,
+  cliManagerGeminiModelsList,
   cliManagerGeminiInfoGet,
   cliManagerGrokConfigGet,
   cliManagerGrokConfigSet,
@@ -145,6 +146,17 @@ export function useCliManagerGeminiConfigQuery(options?: { enabled?: boolean }) 
     queryFn: () => cliManagerGeminiConfigGet(),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliManagerGeminiModelsQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.geminiModels(),
+    queryFn: () => cliManagerGeminiModelsList(),
+    enabled: options?.enabled ?? true,
+    // agy's list changes on update, sign-in or Gemini proxy toggle (cliProxy invalidates it);
+    // otherwise refetched on "刷新状态".
+    staleTime: Infinity,
   });
 }
 

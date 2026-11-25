@@ -54,9 +54,9 @@ function normalizeOptionalResultText(
 function toCliVersionCheck(value: CliVersionCheck): CliVersionCheck {
   return {
     cliKey: normalizeCliUpdateKey(value.cliKey),
-    npmPackage: normalizeRequiredResultText(
-      value.npmPackage,
-      "cli_version_check.npmPackage",
+    packageName: normalizeRequiredResultText(
+      value.packageName,
+      "cli_version_check.packageName",
       CLI_UPDATE_SHORT_TEXT_MAX_CHARS
     ),
     installedVersion: normalizeOptionalResultText(

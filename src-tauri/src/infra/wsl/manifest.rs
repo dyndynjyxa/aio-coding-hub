@@ -45,7 +45,10 @@ pub(super) fn write_wsl_manifest<R: tauri::Runtime>(
     let path = wsl_manifest_path(app, distro)?;
     let json = serde_json::to_string_pretty(manifest)
         .map_err(|e| format!("failed to serialize WSL manifest: {e}"))?;
-    crate::shared::fs::write_file_atomic(&path, json.as_bytes())
+    if json.len() > WSL_MANIFEST_MAX_BYTES {
+        return Err("WSL proxy backup exceeds its size limit".into());
+    }
+    crate::shared::fs::write_private_file_atomic(&path, json.as_bytes())
 }
 
 pub(super) fn delete_wsl_manifest<R: tauri::Runtime>(
@@ -145,21 +148,6 @@ pub(super) fn read_wsl_current_values(
             let auth = read_json_top_level_str(&auth_path, "OPENAI_API_KEY");
             map.insert("OPENAI_API_KEY".to_string(), auth);
         }
-        "gemini" => {
-            let env_path = home.join(".gemini").join(".env");
-            let env_content = read_optional_utf8_file(&env_path)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            map.insert(
-                "GOOGLE_GEMINI_BASE_URL".to_string(),
-                extract_env_value(&env_content, "GOOGLE_GEMINI_BASE_URL"),
-            );
-            map.insert(
-                "GEMINI_API_KEY".to_string(),
-                extract_env_value(&env_content, "GEMINI_API_KEY"),
-            );
-        }
         _ => {}
     }
 
@@ -229,25 +217,6 @@ pub(super) fn extract_toml_value(content: &str, key: &str) -> Option<String> {
         .get(key)?
         .as_str()
         .map(str::to_string)
-}
-
-/// Extract a value from .env like `KEY=value`.
-pub(super) fn extract_env_value(content: &str, key: &str) -> Option<String> {
-    let prefix = format!("{key}=");
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            continue;
-        }
-        let check = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-        if let Some(val) = check.strip_prefix(&prefix) {
-            let val = val.trim();
-            if !val.is_empty() {
-                return Some(val.to_string());
-            }
-        }
-    }
-    None
 }
 
 pub(super) const CODEX_PROVIDER_BACKUP_PREFIX: &str = "model_providers.aio.";
@@ -405,12 +374,12 @@ pub(super) fn restore_wsl_cli_backup(
     distro: &str,
     home: &std::path::Path,
     backup: &WslCliBackup,
-) -> AppResult<()> {
+) -> AppResult<Option<WslCliBackup>> {
     match backup.cli_key.as_str() {
         "claude" => {
             let path = home.join(".claude").join("settings.json");
             if !path.exists() {
-                return Ok(());
+                return Ok(None);
             }
             let bytes = read_file_with_max_len(&path, WSL_CLIENT_CONFIG_MAX_BYTES)?;
             let mut data: serde_json::Value = serde_json::from_slice(&bytes)
@@ -472,80 +441,65 @@ pub(super) fn restore_wsl_cli_backup(
             }
         }
         "gemini" => {
-            let env_path = home.join(".gemini").join(".env");
-            if !env_path.exists() {
-                return Ok(());
-            }
-            let content = read_existing_utf8_file(&env_path)?;
-            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-
-            for key in ["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"] {
-                let prefix = format!("{key}=");
-                // Remove existing lines for this key
-                lines.retain(|l| {
-                    let trimmed = l.trim();
-                    if trimmed.starts_with('#') {
-                        return true;
-                    }
-                    let check = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-                    !check.starts_with(&prefix)
-                });
-                // Re-insert if original had a value
-                if let Some(Some(val)) = backup.original_values.get(key) {
-                    lines.push(format!("{key}={val}"));
-                }
-            }
-
-            let out = lines.join("\n");
-            let env_out = if out.ends_with('\n') { out } else { out + "\n" };
-            write_file_synced(&env_path, env_out.as_bytes())?;
+            let plan = super::config_gemini::plan_wsl_agy(distro, home, Some(backup), None)?;
+            plan.apply(distro)?;
+            return Ok(plan.retained);
         }
         _ => {}
+    }
+    Ok(None)
+}
+
+fn restore_manifest_entries<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    manifest: &WslDistroManifest,
+    should_restore: impl Fn(&WslCliBackup) -> bool,
+) -> AppResult<()> {
+    if !manifest.cli_backups.iter().any(&should_restore) {
+        return Ok(());
+    }
+    let home = match &manifest.wsl_home_unc {
+        Some(path) => std::path::PathBuf::from(path),
+        None => resolve_wsl_home_unc(&manifest.distro)?,
+    };
+    let mut remaining = manifest.clone();
+    remaining.cli_backups.retain_mut(|backup| {
+        if !should_restore(backup) {
+            return true;
+        }
+        match restore_wsl_cli_backup(&manifest.distro, &home, backup) {
+            Ok(Some(retained)) => {
+                *backup = retained;
+                true
+            }
+            Ok(None) => false,
+            Err(error) => {
+                tracing::warn!(
+                    "WSL restore failed for {} in {}: {error}",
+                    backup.cli_key,
+                    manifest.distro
+                );
+                true
+            }
+        }
+    });
+    // Release ownership immediately on successful restores. A different CLI's
+    // failure must not make a later retry remove newly created user configuration.
+    if remaining.cli_backups != manifest.cli_backups {
+        if remaining.cli_backups.is_empty() {
+            delete_wsl_manifest(app, &manifest.distro)?;
+        } else {
+            write_wsl_manifest(app, &manifest.distro, &remaining)?;
+        }
     }
     Ok(())
 }
 
 /// Restore WSL client configurations using saved manifests.
 pub fn restore_wsl_clients<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<()> {
-    let manifests = read_all_wsl_manifests(app)?;
-    if manifests.is_empty() {
-        return Ok(());
-    }
-
-    for manifest in &manifests {
-        let distro = &manifest.distro;
-
-        // Use cached UNC path; fall back to resolving (which needs wsl.exe)
-        let home = match &manifest.wsl_home_unc {
-            Some(p) => std::path::PathBuf::from(p),
-            None => match resolve_wsl_home_unc(distro) {
-                Ok(h) => h,
-                Err(e) => {
-                    tracing::warn!(
-                        "WSL restore skipped for {distro}: no cached home and resolve failed: {e}"
-                    );
-                    continue; // Don't delete manifest -- retry next startup
-                }
-            },
-        };
-
-        let mut all_ok = true;
-        for backup in &manifest.cli_backups {
-            if let Err(e) = restore_wsl_cli_backup(distro, &home, backup) {
-                tracing::warn!("WSL restore failed for {} in {distro}: {e}", backup.cli_key);
-                all_ok = false;
-            } else {
-                tracing::info!("WSL restore succeeded for {} in {distro}", backup.cli_key);
-            }
-        }
-
-        // Only delete manifest if all restores succeeded
-        if all_ok {
-            if let Err(e) = delete_wsl_manifest(app, distro) {
-                tracing::warn!("failed to delete WSL manifest for {distro}: {e}");
-            }
-        } else {
-            tracing::warn!("WSL manifest for {distro} kept -- some restores failed, will retry");
+    for manifest in read_all_wsl_manifests(app)? {
+        if let Err(error) = restore_manifest_entries(app, &manifest, |_| true) {
+            tracing::warn!("WSL restore pending for {}: {error}", manifest.distro);
         }
     }
     Ok(())
@@ -577,45 +531,13 @@ pub fn startup_repair_wsl_manifests<R: tauri::Runtime>(app: &tauri::AppHandle<R>
             })
             .unwrap_or(false);
 
-        if port_alive {
-            tracing::debug!(
-                "WSL manifest for {} still alive (proxy_origin={origin}), keeping",
-                manifest.distro
-            );
-            continue;
-        }
-
-        tracing::info!(
-            "WSL manifest for {} has dead gateway (proxy_origin={origin}), restoring",
-            manifest.distro
-        );
-
-        let home = match &manifest.wsl_home_unc {
-            Some(p) => std::path::PathBuf::from(p),
-            None => match resolve_wsl_home_unc(&manifest.distro) {
-                Ok(h) => h,
-                Err(e) => {
-                    tracing::warn!(
-                        "startup WSL restore skipped for {}: no cached home and resolve failed: {e}",
-                        manifest.distro
-                    );
-                    continue;
-                }
-            },
-        };
-
-        for backup in &manifest.cli_backups {
-            if let Err(e) = restore_wsl_cli_backup(&manifest.distro, &home, backup) {
-                tracing::warn!(
-                    "startup WSL restore failed for {} in {}: {e}",
-                    backup.cli_key,
-                    manifest.distro
-                );
-            }
-        }
-        if let Err(e) = delete_wsl_manifest(app, &manifest.distro) {
+        if let Err(error) = restore_manifest_entries(app, manifest, |backup| {
+            !port_alive
+                || super::config_gemini::has_legacy_env(backup)
+                || super::config_gemini::is_inactive(backup)
+        }) {
             tracing::warn!(
-                "failed to delete stale WSL manifest for {}: {e}",
+                "startup WSL restore pending for {}: {error}",
                 manifest.distro
             );
         }

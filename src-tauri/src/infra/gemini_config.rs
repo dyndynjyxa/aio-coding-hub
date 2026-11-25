@@ -1,12 +1,43 @@
-//! Usage: Read / patch Gemini CLI `settings.json` (~/.gemini/settings.json).
+//! Usage: Read / patch Antigravity CLI `settings.json` (~/.gemini/antigravity-cli/settings.json).
+//!
+//! agy stores only non-default values and rejects unknown enum values with a blocking
+//! "Settings Error" screen, so every enum written here is validated first. `modelProvider`
+//! is deliberately never written: `"gemini"` there would make agy bypass the gateway
+//! configured in ~/.gemini/config/config.json.
 
 use crate::shared::fs::{
     is_symlink, read_optional_file_with_max_len, write_file_atomic_if_changed,
 };
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const GEMINI_CONFIG_MAX_BYTES: usize = 1024 * 1024;
+const GEMINI_MODEL_LABEL_MAX_CHARS: usize = 200;
+/// UI value for agy's explicit `default` agent mode, stored on disk as `""`.
+/// An absent key means "CLI default" (`auto` where available since agy 1.5.7).
+const AGENT_MODE_DEFAULT: &str = "default";
+
+const AGENT_MODES: &[&str] = &[AGENT_MODE_DEFAULT, "accept-edits", "auto", "plan"];
+const TOOL_PERMISSIONS: &[&str] = &[
+    "request-review",
+    "proceed-in-sandbox",
+    "always-proceed",
+    "strict",
+];
+const ARTIFACT_REVIEW_POLICIES: &[&str] = &["asks-for-review", "agent-decides", "always-proceed"];
+const COLOR_SCHEMES: &[&str] = &[
+    "terminal",
+    "light",
+    "solarized light",
+    "colorblind-friendly light",
+    "dark",
+    "solarized dark",
+    "colorblind-friendly dark",
+    "tokyo night",
+];
+const ALT_SCREEN_MODES: &[&str] = &["default", "always", "never"];
+const VERBOSITY_LEVELS: &[&str] = &["high", "medium", "low"];
+const EDITOR_MODES: &[&str] = &["default", "vim"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "camelCase")]
@@ -14,451 +45,159 @@ pub struct GeminiConfigState {
     pub config_dir: String,
     pub config_path: String,
     pub exists: bool,
-    pub model_name: Option<String>,
-    pub model_max_session_turns: Option<i64>,
-    pub model_compression_threshold: Option<f64>,
-    pub default_approval_mode: Option<String>,
-    pub enable_auto_update: Option<bool>,
-    pub enable_notifications: Option<bool>,
-    pub vim_mode: Option<bool>,
-    pub retry_fetch_errors: Option<bool>,
-    pub max_attempts: Option<u32>,
-    pub ui_theme: Option<String>,
-    pub ui_hide_banner: Option<bool>,
-    pub ui_hide_tips: Option<bool>,
-    pub ui_show_line_numbers: Option<bool>,
-    pub ui_inline_thinking_mode: Option<String>,
-    pub usage_statistics_enabled: Option<bool>,
-    pub session_retention_enabled: Option<bool>,
-    pub session_retention_max_age: Option<String>,
-    pub plan_model_routing: Option<bool>,
-    pub security_auth_selected_type: Option<String>,
+    pub model: Option<String>,
+    pub agent_mode: Option<String>,
+    pub tool_permission: Option<String>,
+    pub artifact_review_policy: Option<String>,
+    pub enable_terminal_sandbox: Option<bool>,
+    pub allow_non_workspace_access: Option<bool>,
+    pub color_scheme: Option<String>,
+    pub alt_screen_mode: Option<String>,
+    pub verbosity: Option<String>,
+    pub editor_mode: Option<String>,
+    pub notifications: Option<bool>,
+    pub show_tips: Option<bool>,
 }
 
+/// `None`/`null` leaves a key untouched; an empty string removes it (CLI default).
 #[derive(Debug, Clone, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiConfigPatch {
-    pub model_name: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_i64_patch")]
-    pub model_max_session_turns: Option<Option<i64>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_f64_patch")]
-    pub model_compression_threshold: Option<Option<f64>>,
-    pub default_approval_mode: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub enable_auto_update: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub enable_notifications: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub vim_mode: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub retry_fetch_errors: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_u32_patch")]
-    pub max_attempts: Option<Option<u32>>,
-    pub ui_theme: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub ui_hide_banner: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub ui_hide_tips: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub ui_show_line_numbers: Option<Option<bool>>,
-    pub ui_inline_thinking_mode: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub usage_statistics_enabled: Option<Option<bool>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub session_retention_enabled: Option<Option<bool>>,
-    pub session_retention_max_age: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_bool_patch")]
-    pub plan_model_routing: Option<Option<bool>>,
-    pub security_auth_selected_type: Option<String>,
-}
-
-fn deserialize_nullable_i64_patch<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match value {
-        serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Number(number) => number
-            .as_i64()
-            .map(|value| Some(Some(value)))
-            .ok_or_else(|| serde::de::Error::custom("expected integer for Gemini config patch")),
-        serde_json::Value::String(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return Ok(Some(None));
-            }
-            trimmed
-                .parse::<i64>()
-                .map(|value| Some(Some(value)))
-                .map_err(|_| serde::de::Error::custom("expected integer for Gemini config patch"))
-        }
-        _ => Err(serde::de::Error::custom(
-            "expected integer, string, or null for Gemini config patch",
-        )),
-    }
-}
-
-fn deserialize_nullable_u32_patch<'de, D>(deserializer: D) -> Result<Option<Option<u32>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match value {
-        serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Number(number) => {
-            let value = number.as_u64().ok_or_else(|| {
-                serde::de::Error::custom("expected unsigned integer for Gemini config patch")
-            })?;
-            let value = u32::try_from(value).map_err(|_| {
-                serde::de::Error::custom("Gemini config patch integer out of range for u32")
-            })?;
-            Ok(Some(Some(value)))
-        }
-        serde_json::Value::String(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return Ok(Some(None));
-            }
-            trimmed
-                .parse::<u32>()
-                .map(|value| Some(Some(value)))
-                .map_err(|_| {
-                    serde::de::Error::custom("expected unsigned integer for Gemini config patch")
-                })
-        }
-        _ => Err(serde::de::Error::custom(
-            "expected unsigned integer, string, or null for Gemini config patch",
-        )),
-    }
-}
-
-fn deserialize_nullable_f64_patch<'de, D>(deserializer: D) -> Result<Option<Option<f64>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match value {
-        serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Number(number) => number
-            .as_f64()
-            .map(|value| Some(Some(value)))
-            .ok_or_else(|| serde::de::Error::custom("expected number for Gemini config patch")),
-        serde_json::Value::String(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return Ok(Some(None));
-            }
-            trimmed
-                .parse::<f64>()
-                .map(|value| Some(Some(value)))
-                .map_err(|_| serde::de::Error::custom("expected number for Gemini config patch"))
-        }
-        _ => Err(serde::de::Error::custom(
-            "expected number, string, or null for Gemini config patch",
-        )),
-    }
-}
-
-fn deserialize_nullable_bool_patch<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<bool>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match value {
-        serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Bool(value) => Ok(Some(Some(value))),
-        serde_json::Value::Number(number) => {
-            let value = number.as_i64().ok_or_else(|| {
-                serde::de::Error::custom("expected boolean for Gemini config patch")
-            })?;
-            Ok(Some(Some(value != 0)))
-        }
-        serde_json::Value::String(raw) => {
-            let trimmed = raw.trim().to_ascii_lowercase();
-            if trimmed.is_empty() {
-                return Ok(Some(None));
-            }
-            let value = match trimmed.as_str() {
-                "1" | "true" | "yes" | "y" | "on" => true,
-                "0" | "false" | "no" | "n" | "off" => false,
-                _ => {
-                    return Err(serde::de::Error::custom(
-                        "expected boolean-compatible string for Gemini config patch",
-                    ))
-                }
-            };
-            Ok(Some(Some(value)))
-        }
-        _ => Err(serde::de::Error::custom(
-            "expected boolean, string, number, or null for Gemini config patch",
-        )),
-    }
-}
-
-fn home_dir<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> crate::shared::error::AppResult<PathBuf> {
-    crate::app_paths::home_dir(app)
+    pub model: Option<String>,
+    pub agent_mode: Option<String>,
+    pub tool_permission: Option<String>,
+    pub artifact_review_policy: Option<String>,
+    pub enable_terminal_sandbox: Option<bool>,
+    pub allow_non_workspace_access: Option<bool>,
+    pub color_scheme: Option<String>,
+    pub alt_screen_mode: Option<String>,
+    pub verbosity: Option<String>,
+    pub editor_mode: Option<String>,
+    pub notifications: Option<bool>,
+    pub show_tips: Option<bool>,
 }
 
 fn gemini_config_dir<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<PathBuf> {
-    Ok(home_dir(app)?.join(".gemini"))
-}
-
-fn gemini_config_path<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> crate::shared::error::AppResult<PathBuf> {
-    Ok(gemini_config_dir(app)?.join("settings.json"))
-}
-
-fn json_to_bytes(
-    value: &serde_json::Value,
-    hint: &str,
-) -> crate::shared::error::AppResult<Vec<u8>> {
-    let mut out =
-        serde_json::to_vec_pretty(value).map_err(|e| format!("failed to serialize {hint}: {e}"))?;
-    out.push(b'\n');
-    ensure_gemini_config_len(&out, hint)?;
-    Ok(out)
-}
-
-fn ensure_gemini_config_len(bytes: &[u8], label: &str) -> crate::shared::error::AppResult<()> {
-    if bytes.len() > GEMINI_CONFIG_MAX_BYTES {
-        return Err(format!(
-            "SEC_INVALID_INPUT: {label} too large (max {GEMINI_CONFIG_MAX_BYTES} bytes)"
-        )
-        .into());
-    }
-    Ok(())
-}
-
-fn read_optional_gemini_config_file(
-    path: &Path,
-) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
-    read_optional_file_with_max_len(path, GEMINI_CONFIG_MAX_BYTES)
+    Ok(crate::app_paths::home_dir(app)?
+        .join(".gemini")
+        .join("antigravity-cli"))
 }
 
 fn parse_json_root(bytes: Option<Vec<u8>>) -> crate::shared::error::AppResult<serde_json::Value> {
-    match bytes {
-        Some(bytes) => {
-            let root: serde_json::Value = serde_json::from_slice(&bytes)
-                .map_err(|e| format!("failed to parse gemini settings.json: {e}"))?;
-            if !root.is_object() {
-                return Err("gemini settings.json root must be a JSON object".into());
-            }
-            Ok(root)
-        }
-        None => Ok(serde_json::json!({})),
-    }
-}
-
-fn ensure_json_object_root(root: &mut serde_json::Value) -> crate::shared::error::AppResult<()> {
+    let Some(bytes) = bytes else {
+        return Ok(serde_json::json!({}));
+    };
+    // agy tolerates a UTF-8 BOM (fixed in 1.5.9); serde_json does not.
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+    let root: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| format!("failed to parse antigravity settings.json: {e}"))?;
     if !root.is_object() {
-        *root = serde_json::Value::Object(Default::default());
+        return Err("antigravity settings.json root must be a JSON object".into());
     }
-    root.as_object()
-        .map(|_| ())
-        .ok_or_else(|| "gemini settings.json root must be a JSON object".into())
+    Ok(root)
 }
 
-fn string_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .as_str()
+fn string_at(root: &serde_json::Value, key: &str) -> Option<String> {
+    root.get(key)
+        .and_then(|v| v.as_str())
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|v| !v.is_empty())
         .map(ToOwned::to_owned)
 }
 
-fn bool_value(value: &serde_json::Value) -> Option<bool> {
-    match value {
-        serde_json::Value::Bool(value) => Some(*value),
-        serde_json::Value::Number(number) => number.as_i64().map(|value| value != 0),
-        serde_json::Value::String(raw) => {
-            let trimmed = raw.trim().to_ascii_lowercase();
-            match trimmed.as_str() {
-                "" => None,
-                "1" | "true" | "yes" | "y" | "on" => Some(true),
-                "0" | "false" | "no" | "n" | "off" => Some(false),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-fn i64_value(value: &serde_json::Value) -> Option<i64> {
-    match value {
-        serde_json::Value::Number(number) => number.as_i64(),
-        serde_json::Value::String(raw) => raw.trim().parse::<i64>().ok(),
-        _ => None,
-    }
-}
-
-fn u32_value(value: &serde_json::Value) -> Option<u32> {
-    match value {
-        serde_json::Value::Number(number) => {
-            number.as_u64().and_then(|value| u32::try_from(value).ok())
-        }
-        serde_json::Value::String(raw) => raw.trim().parse::<u32>().ok(),
-        _ => None,
-    }
-}
-
-fn f64_value(value: &serde_json::Value) -> Option<f64> {
-    match value {
-        serde_json::Value::Number(number) => number.as_f64(),
-        serde_json::Value::String(raw) => raw.trim().parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
-fn pointer<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
-    root.pointer(path)
+fn bool_at(root: &serde_json::Value, key: &str) -> Option<bool> {
+    root.get(key).and_then(|v| v.as_bool())
 }
 
 fn make_state(
-    config_dir: String,
-    config_path: String,
+    config_dir: &Path,
+    config_path: &Path,
     exists: bool,
     root: &serde_json::Value,
 ) -> GeminiConfigState {
+    let agent_mode = match root.get("agentMode").and_then(|v| v.as_str()) {
+        Some(raw) if raw.trim().is_empty() => Some(AGENT_MODE_DEFAULT.to_string()),
+        _ => string_at(root, "agentMode"),
+    };
     GeminiConfigState {
-        config_dir,
-        config_path,
+        config_dir: config_dir.to_string_lossy().to_string(),
+        config_path: config_path.to_string_lossy().to_string(),
         exists,
-        model_name: pointer(root, "/model/name").and_then(string_value),
-        model_max_session_turns: pointer(root, "/model/maxSessionTurns").and_then(i64_value),
-        model_compression_threshold: pointer(root, "/model/compressionThreshold")
-            .and_then(f64_value),
-        default_approval_mode: pointer(root, "/general/defaultApprovalMode").and_then(string_value),
-        enable_auto_update: pointer(root, "/general/enableAutoUpdate").and_then(bool_value),
-        enable_notifications: pointer(root, "/general/enableNotifications").and_then(bool_value),
-        vim_mode: pointer(root, "/general/vimMode").and_then(bool_value),
-        retry_fetch_errors: pointer(root, "/general/retryFetchErrors").and_then(bool_value),
-        max_attempts: pointer(root, "/general/maxAttempts").and_then(u32_value),
-        ui_theme: pointer(root, "/ui/theme").and_then(string_value),
-        ui_hide_banner: pointer(root, "/ui/hideBanner").and_then(bool_value),
-        ui_hide_tips: pointer(root, "/ui/hideTips").and_then(bool_value),
-        ui_show_line_numbers: pointer(root, "/ui/showLineNumbers").and_then(bool_value),
-        ui_inline_thinking_mode: pointer(root, "/ui/inlineThinkingMode").and_then(string_value),
-        usage_statistics_enabled: pointer(root, "/privacy/usageStatisticsEnabled")
-            .and_then(bool_value),
-        session_retention_enabled: pointer(root, "/general/sessionRetention/enabled")
-            .and_then(bool_value),
-        session_retention_max_age: pointer(root, "/general/sessionRetention/maxAge")
-            .and_then(string_value),
-        plan_model_routing: pointer(root, "/general/plan/modelRouting").and_then(bool_value),
-        security_auth_selected_type: pointer(root, "/security/auth/selectedType")
-            .and_then(string_value),
+        model: string_at(root, "model"),
+        agent_mode,
+        tool_permission: string_at(root, "toolPermission"),
+        artifact_review_policy: string_at(root, "artifactReviewPolicy"),
+        enable_terminal_sandbox: bool_at(root, "enableTerminalSandbox"),
+        allow_non_workspace_access: bool_at(root, "allowNonWorkspaceAccess"),
+        color_scheme: string_at(root, "colorScheme"),
+        alt_screen_mode: string_at(root, "altScreenMode"),
+        verbosity: string_at(root, "verbosity"),
+        editor_mode: string_at(root, "editorMode"),
+        notifications: bool_at(root, "notifications"),
+        show_tips: bool_at(root, "showTips"),
     }
 }
 
-fn set_nested_value(
-    root: &mut serde_json::Value,
-    path: &[&str],
-    value: serde_json::Value,
+fn patch_enum(
+    root: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    patch: Option<String>,
+    allowed: &[&str],
 ) -> crate::shared::error::AppResult<()> {
-    ensure_json_object_root(root)?;
-    let mut current = root;
-
-    for segment in &path[..path.len().saturating_sub(1)] {
-        let object = current
-            .as_object_mut()
-            .ok_or_else(|| "gemini settings.json path parent must be an object".to_string())?;
-        let entry = object
-            .entry((*segment).to_string())
-            .or_insert_with(|| serde_json::Value::Object(Default::default()));
-        if !entry.is_object() {
-            *entry = serde_json::Value::Object(Default::default());
-        }
-        current = entry;
+    let Some(raw) = patch else {
+        return Ok(());
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        root.remove(key);
+        return Ok(());
     }
-
-    let object = current
-        .as_object_mut()
-        .ok_or_else(|| "gemini settings.json path parent must be an object".to_string())?;
-    object.insert(path[path.len() - 1].to_string(), value);
+    if !allowed.contains(&value) {
+        return Err(format!("SEC_INVALID_INPUT: unsupported {key}={value}").into());
+    }
+    let stored = if key == "agentMode" && value == AGENT_MODE_DEFAULT {
+        ""
+    } else {
+        value
+    };
+    root.insert(
+        key.to_string(),
+        serde_json::Value::String(stored.to_string()),
+    );
     Ok(())
 }
 
-fn remove_nested_value_internal(current: &mut serde_json::Value, path: &[&str]) -> bool {
-    let Some(object) = current.as_object_mut() else {
-        return false;
-    };
-
-    if path.len() == 1 {
-        object.remove(path[0]);
-        return object.is_empty();
-    }
-
-    let should_remove_child = object
-        .get_mut(path[0])
-        .map(|child| remove_nested_value_internal(child, &path[1..]))
-        .unwrap_or(false);
-
-    if should_remove_child {
-        object.remove(path[0]);
-    }
-
-    object.is_empty()
-}
-
-fn remove_nested_value(root: &mut serde_json::Value, path: &[&str]) {
-    if path.is_empty() || !root.is_object() {
-        return;
-    }
-    let _ = remove_nested_value_internal(root, path);
-}
-
-fn patch_string_field(
-    root: &mut serde_json::Value,
-    path: &[&str],
+fn patch_model(
+    root: &mut serde_json::Map<String, serde_json::Value>,
     patch: Option<String>,
 ) -> crate::shared::error::AppResult<()> {
     let Some(raw) = patch else {
         return Ok(());
     };
-
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        remove_nested_value(root, path);
-    } else {
-        set_nested_value(root, path, serde_json::Value::String(trimmed.to_string()))?;
+    let value = raw.trim();
+    if value.is_empty() {
+        root.remove("model");
+        return Ok(());
     }
+    if value.chars().count() > GEMINI_MODEL_LABEL_MAX_CHARS || value.chars().any(char::is_control) {
+        return Err("SEC_INVALID_INPUT: invalid model label".into());
+    }
+    root.insert(
+        "model".to_string(),
+        serde_json::Value::String(value.to_string()),
+    );
     Ok(())
 }
 
-fn patch_nullable_field(
-    root: &mut serde_json::Value,
-    path: &[&str],
-    patch: Option<serde_json::Value>,
-) -> crate::shared::error::AppResult<()> {
-    let Some(value) = patch else {
-        return Ok(());
-    };
-    set_nested_value(root, path, value)
-}
-
-fn patch_optional_nullable_field(
-    root: &mut serde_json::Value,
-    path: &[&str],
-    patch: Option<Option<serde_json::Value>>,
-) -> crate::shared::error::AppResult<()> {
-    let Some(value) = patch else {
-        return Ok(());
-    };
-
-    match value {
-        Some(value) => patch_nullable_field(root, path, Some(value)),
-        None => {
-            remove_nested_value(root, path);
-            Ok(())
-        }
+fn patch_bool(
+    root: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    patch: Option<bool>,
+) {
+    if let Some(value) = patch {
+        root.insert(key.to_string(), serde_json::Value::Bool(value));
     }
 }
 
@@ -466,331 +205,338 @@ fn patch_gemini_config(
     mut root: serde_json::Value,
     patch: GeminiConfigPatch,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
-    ensure_json_object_root(&mut root)?;
+    let map = root
+        .as_object_mut()
+        .ok_or("antigravity settings.json root must be a JSON object")?;
 
-    patch_string_field(&mut root, &["model", "name"], patch.model_name)?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["model", "maxSessionTurns"],
-        patch
-            .model_max_session_turns
-            .map(|value| value.map(serde_json::Value::from)),
+    patch_model(map, patch.model)?;
+    patch_enum(map, "agentMode", patch.agent_mode, AGENT_MODES)?;
+    patch_enum(
+        map,
+        "toolPermission",
+        patch.tool_permission,
+        TOOL_PERMISSIONS,
     )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["model", "compressionThreshold"],
-        patch
-            .model_compression_threshold
-            .map(|value| value.map(serde_json::Value::from)),
+    patch_enum(
+        map,
+        "artifactReviewPolicy",
+        patch.artifact_review_policy,
+        ARTIFACT_REVIEW_POLICIES,
     )?;
-    patch_string_field(
-        &mut root,
-        &["general", "defaultApprovalMode"],
-        patch.default_approval_mode,
+    patch_enum(map, "colorScheme", patch.color_scheme, COLOR_SCHEMES)?;
+    patch_enum(
+        map,
+        "altScreenMode",
+        patch.alt_screen_mode,
+        ALT_SCREEN_MODES,
     )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "enableAutoUpdate"],
-        patch
-            .enable_auto_update
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "enableNotifications"],
-        patch
-            .enable_notifications
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "vimMode"],
-        patch
-            .vim_mode
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "retryFetchErrors"],
-        patch
-            .retry_fetch_errors
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "maxAttempts"],
-        patch
-            .max_attempts
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_string_field(&mut root, &["ui", "theme"], patch.ui_theme)?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["ui", "hideBanner"],
-        patch
-            .ui_hide_banner
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["ui", "hideTips"],
-        patch
-            .ui_hide_tips
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["ui", "showLineNumbers"],
-        patch
-            .ui_show_line_numbers
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_string_field(
-        &mut root,
-        &["ui", "inlineThinkingMode"],
-        patch.ui_inline_thinking_mode,
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["privacy", "usageStatisticsEnabled"],
-        patch
-            .usage_statistics_enabled
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "sessionRetention", "enabled"],
-        patch
-            .session_retention_enabled
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_string_field(
-        &mut root,
-        &["general", "sessionRetention", "maxAge"],
-        patch.session_retention_max_age,
-    )?;
-    patch_optional_nullable_field(
-        &mut root,
-        &["general", "plan", "modelRouting"],
-        patch
-            .plan_model_routing
-            .map(|value| value.map(serde_json::Value::from)),
-    )?;
-    patch_string_field(
-        &mut root,
-        &["security", "auth", "selectedType"],
-        patch.security_auth_selected_type,
-    )?;
+    patch_enum(map, "verbosity", patch.verbosity, VERBOSITY_LEVELS)?;
+    patch_enum(map, "editorMode", patch.editor_mode, EDITOR_MODES)?;
+    patch_bool(map, "enableTerminalSandbox", patch.enable_terminal_sandbox);
+    patch_bool(
+        map,
+        "allowNonWorkspaceAccess",
+        patch.allow_non_workspace_access,
+    );
+    patch_bool(map, "notifications", patch.notifications);
+    patch_bool(map, "showTips", patch.show_tips);
 
     Ok(root)
 }
 
-pub fn gemini_config_get<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> crate::shared::error::AppResult<GeminiConfigState> {
-    let config_dir = gemini_config_dir(app)?;
-    let config_path = gemini_config_path(app)?;
-    let exists = config_path.exists();
-    let root = parse_json_root(read_optional_gemini_config_file(&config_path)?)?;
-
-    Ok(make_state(
-        config_dir.to_string_lossy().to_string(),
-        config_path.to_string_lossy().to_string(),
-        exists,
-        &root,
-    ))
+fn json_to_bytes(value: &serde_json::Value) -> crate::shared::error::AppResult<Vec<u8>> {
+    let mut out = serde_json::to_vec_pretty(value)
+        .map_err(|e| format!("failed to serialize antigravity settings.json: {e}"))?;
+    out.push(b'\n');
+    if out.len() > GEMINI_CONFIG_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: antigravity settings.json too large (max {GEMINI_CONFIG_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(out)
 }
 
-pub fn gemini_config_set<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    patch: GeminiConfigPatch,
-) -> crate::shared::error::AppResult<GeminiConfigState> {
-    let path = gemini_config_path(app)?;
-    if path.exists() && is_symlink(&path)? {
+fn read_config(path: &Path) -> crate::shared::error::AppResult<serde_json::Value> {
+    parse_json_root(read_optional_file_with_max_len(
+        path,
+        GEMINI_CONFIG_MAX_BYTES,
+    )?)
+}
+
+fn write_config(path: &Path, root: &serde_json::Value) -> crate::shared::error::AppResult<()> {
+    if path.exists() && is_symlink(path)? {
         return Err(format!(
             "SEC_INVALID_INPUT: refusing to modify symlink path={}",
             path.display()
         )
         .into());
     }
+    let changed = write_file_atomic_if_changed(path, &json_to_bytes(root)?)?;
+    // agy keeps this file user-only (0600); it can hold proxy credentials.
+    #[cfg(unix)]
+    if changed {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("failed to restrict {}: {e}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = changed;
+    Ok(())
+}
 
-    let current = parse_json_root(read_optional_gemini_config_file(&path)?)?;
-    let next = patch_gemini_config(current, patch)?;
-    let bytes = json_to_bytes(&next, "gemini/settings.json")?;
-    let _ = write_file_atomic_if_changed(&path, &bytes)?;
-    gemini_config_get(app)
+fn config_get_at(dir: &Path) -> crate::shared::error::AppResult<GeminiConfigState> {
+    let path = dir.join("settings.json");
+    let root = read_config(&path)?;
+    Ok(make_state(dir, &path, path.exists(), &root))
+}
+
+fn config_set_at(
+    dir: &Path,
+    patch: GeminiConfigPatch,
+) -> crate::shared::error::AppResult<GeminiConfigState> {
+    let path = dir.join("settings.json");
+    let next = patch_gemini_config(read_config(&path)?, patch)?;
+    write_config(&path, &next)?;
+    config_get_at(dir)
+}
+
+pub fn gemini_config_get<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<GeminiConfigState> {
+    config_get_at(&gemini_config_dir(app)?)
+}
+
+pub fn gemini_config_set<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    patch: GeminiConfigPatch,
+) -> crate::shared::error::AppResult<GeminiConfigState> {
+    config_set_at(&gemini_config_dir(app)?, patch)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn empty_patch() -> GeminiConfigPatch {
-        GeminiConfigPatch::default()
+    fn read_json(path: &Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(path).expect("read")).expect("json")
     }
 
     #[test]
-    fn patch_preserves_unknown_keys_and_updates_nested_values() {
-        let input = serde_json::json!({
-            "model": {
-                "name": "gemini-2.5-flash",
-                "keep": "model-extra"
-            },
-            "general": {
-                "retryFetchErrors": false,
-                "other": 7
-            },
-            "topLevel": true
-        });
+    fn set_preserves_unknown_keys_and_writes_agy_keys() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"$schema":"https://antigravity.google/schemas/v1/settings.json","trustedWorkspaces":["/w"],"permissions":{"allow":["x"]}}"#,
+        )
+        .expect("seed");
 
-        let patched = patch_gemini_config(
-            input,
+        let state = config_set_at(
+            dir.path(),
             GeminiConfigPatch {
-                model_name: Some("gemini-2.5-pro".to_string()),
-                retry_fetch_errors: Some(Some(true)),
-                ..empty_patch()
+                model: Some(" Gemini 3.8 Flash (Low) ".into()),
+                tool_permission: Some("strict".into()),
+                notifications: Some(true),
+                ..Default::default()
             },
         )
-        .expect("patch");
+        .expect("set");
 
-        assert_eq!(
-            patched.pointer("/model/name").and_then(|v| v.as_str()),
-            Some("gemini-2.5-pro")
-        );
-        assert_eq!(
-            patched.pointer("/model/keep").and_then(|v| v.as_str()),
-            Some("model-extra")
-        );
-        assert_eq!(
-            patched
-                .pointer("/general/retryFetchErrors")
-                .and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            patched.pointer("/general/other").and_then(|v| v.as_i64()),
-            Some(7)
-        );
-        assert_eq!(
-            patched.get("topLevel").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        let root = read_json(&path);
+        assert_eq!(root["model"], "Gemini 3.8 Flash (Low)");
+        assert_eq!(root["toolPermission"], "strict");
+        assert_eq!(root["notifications"], true);
+        assert_eq!(root["trustedWorkspaces"][0], "/w");
+        assert_eq!(root["permissions"]["allow"][0], "x");
+        assert!(root.get("$schema").is_some());
+        assert!(root.get("modelProvider").is_none());
+        assert!(state.exists);
+        assert_eq!(state.model.as_deref(), Some("Gemini 3.8 Flash (Low)"));
+        assert_eq!(state.tool_permission.as_deref(), Some("strict"));
+        assert_eq!(state.notifications, Some(true));
     }
 
     #[test]
-    fn patch_deletes_string_and_nullable_values_and_cleans_empty_objects() {
-        let input = serde_json::json!({
-            "model": { "name": "gemini-2.5-pro" },
-            "privacy": { "usageStatisticsEnabled": true },
-            "other": "keep"
-        });
+    fn missing_file_reads_as_empty_and_is_created_user_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let nested = dir.path().join("antigravity-cli");
 
-        let patched = patch_gemini_config(
-            input,
+        let state = config_get_at(&nested).expect("get");
+        assert!(!state.exists);
+        assert_eq!(state.model, None);
+        assert_eq!(state.agent_mode, None);
+
+        config_set_at(
+            &nested,
             GeminiConfigPatch {
-                model_name: Some(String::new()),
-                usage_statistics_enabled: Some(None),
-                ..empty_patch()
+                show_tips: Some(false),
+                ..Default::default()
             },
         )
-        .expect("patch");
-
-        assert!(patched.get("model").is_none(), "{patched}");
-        assert!(patched.get("privacy").is_none(), "{patched}");
-        assert_eq!(patched.get("other").and_then(|v| v.as_str()), Some("keep"));
+        .expect("set");
+        let path = nested.join("settings.json");
+        assert_eq!(read_json(&path), serde_json::json!({ "showTips": false }));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 
     #[test]
-    fn make_state_extracts_nested_values() {
-        let root = serde_json::json!({
-            "model": {
-                "name": "gemini-2.5-pro",
-                "maxSessionTurns": -1,
-                "compressionThreshold": 0.7
-            },
-            "general": {
-                "defaultApprovalMode": "plan",
-                "enableAutoUpdate": true,
-                "enableNotifications": false,
-                "vimMode": true,
-                "retryFetchErrors": true,
-                "maxAttempts": 5
-            },
-            "ui": {
-                "theme": "ANSI",
-                "hideBanner": true,
-                "hideTips": false,
-                "showLineNumbers": true,
-                "inlineThinkingMode": "full"
-            },
-            "privacy": {
-                "usageStatisticsEnabled": false
-            }
-        });
+    fn empty_string_removes_key_and_null_leaves_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"model":"Gemini 3.1 Pro (High)","colorScheme":"dark","verbosity":"low"}"#,
+        )
+        .expect("seed");
 
-        let state = make_state(
-            "C:/Users/x/.gemini".to_string(),
-            "C:/Users/x/.gemini/settings.json".to_string(),
-            true,
-            &root,
+        let state = config_set_at(
+            dir.path(),
+            GeminiConfigPatch {
+                model: Some(String::new()),
+                color_scheme: Some("  ".into()),
+                verbosity: None,
+                ..Default::default()
+            },
+        )
+        .expect("set");
+
+        assert_eq!(state.model, None);
+        assert_eq!(state.color_scheme, None);
+        assert_eq!(state.verbosity.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn agent_mode_default_round_trips_as_empty_string() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = config_set_at(
+            dir.path(),
+            GeminiConfigPatch {
+                agent_mode: Some("default".into()),
+                ..Default::default()
+            },
+        )
+        .expect("set");
+
+        assert_eq!(
+            read_json(&dir.path().join("settings.json"))["agentMode"],
+            ""
         );
+        assert_eq!(state.agent_mode.as_deref(), Some("default"));
 
-        assert_eq!(state.model_name.as_deref(), Some("gemini-2.5-pro"));
-        assert_eq!(state.model_max_session_turns, Some(-1));
-        assert_eq!(state.model_compression_threshold, Some(0.7));
-        assert_eq!(state.default_approval_mode.as_deref(), Some("plan"));
-        assert_eq!(state.enable_auto_update, Some(true));
-        assert_eq!(state.enable_notifications, Some(false));
-        assert_eq!(state.vim_mode, Some(true));
-        assert_eq!(state.retry_fetch_errors, Some(true));
-        assert_eq!(state.max_attempts, Some(5));
-        assert_eq!(state.ui_theme.as_deref(), Some("ANSI"));
-        assert_eq!(state.ui_hide_banner, Some(true));
-        assert_eq!(state.ui_hide_tips, Some(false));
-        assert_eq!(state.ui_show_line_numbers, Some(true));
-        assert_eq!(state.ui_inline_thinking_mode.as_deref(), Some("full"));
-        assert_eq!(state.usage_statistics_enabled, Some(false));
+        let state = config_set_at(
+            dir.path(),
+            GeminiConfigPatch {
+                agent_mode: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .expect("reset");
+        assert_eq!(state.agent_mode, None);
     }
 
     #[test]
-    fn nullable_patch_deserializers_accept_empty_string_as_delete() {
-        let patch: GeminiConfigPatch = serde_json::from_value(serde_json::json!({
-            "modelMaxSessionTurns": "",
-            "enableAutoUpdate": "",
-            "maxAttempts": "",
-            "modelCompressionThreshold": ""
-        }))
-        .expect("deserialize patch");
+    fn rejects_unknown_enum_value_without_writing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"toolPermission":"strict"}"#).expect("seed");
 
-        assert_eq!(patch.model_max_session_turns, Some(None));
-        assert_eq!(patch.enable_auto_update, Some(None));
-        assert_eq!(patch.max_attempts, Some(None));
-        assert_eq!(patch.model_compression_threshold, Some(None));
+        let err = config_set_at(
+            dir.path(),
+            GeminiConfigPatch {
+                tool_permission: Some("yolo".into()),
+                notifications: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("SEC_INVALID_INPUT"), "{err}");
+        assert_eq!(
+            read_json(&path),
+            serde_json::json!({ "toolPermission": "strict" })
+        );
     }
 
     #[test]
-    fn read_optional_gemini_config_file_rejects_oversized_file() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("settings.json");
-        std::fs::write(&path, vec![b'x'; GEMINI_CONFIG_MAX_BYTES + 1]).expect("write config");
+    fn rejects_control_characters_in_model_label() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let err = config_set_at(
+            dir.path(),
+            GeminiConfigPatch {
+                model: Some("Gemini\n3".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("invalid model label"), "{err}");
+        assert!(!dir.path().join("settings.json").exists());
+    }
 
-        let err = read_optional_gemini_config_file(&path)
+    #[test]
+    fn reads_file_with_utf8_bom_and_reports_unknown_values_as_is() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut bytes = b"\xEF\xBB\xBF".to_vec();
+        bytes.extend_from_slice(br#"{"verbosity":"future-level","enableTerminalSandbox":true}"#);
+        std::fs::write(dir.path().join("settings.json"), bytes).expect("seed");
+
+        let state = config_get_at(dir.path()).expect("get");
+        assert_eq!(state.verbosity.as_deref(), Some("future-level"));
+        assert_eq!(state.enable_terminal_sandbox, Some(true));
+    }
+
+    #[test]
+    fn invalid_json_and_non_object_root_are_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+
+        std::fs::write(&path, "{not json").expect("seed");
+        assert!(config_get_at(dir.path()).is_err());
+
+        std::fs::write(&path, "[]").expect("seed");
+        let err = config_set_at(dir.path(), GeminiConfigPatch::default())
             .unwrap_err()
             .to_string();
-
-        assert!(err.contains("too large"));
+        assert!(err.contains("must be a JSON object"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "[]");
     }
 
     #[test]
-    fn json_to_bytes_rejects_oversized_gemini_config() {
-        let value = serde_json::json!({
-            "unknown": "x".repeat(GEMINI_CONFIG_MAX_BYTES + 1)
-        });
+    fn rejects_oversized_settings_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("settings.json"),
+            vec![b' '; GEMINI_CONFIG_MAX_BYTES + 1],
+        )
+        .expect("seed");
+        let err = config_get_at(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("too large"), "{err}");
+    }
 
-        let err = json_to_bytes(&value, "gemini/settings.json")
-            .unwrap_err()
-            .to_string();
+    #[cfg(unix)]
+    #[test]
+    fn refuses_to_write_through_symlink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("real.json");
+        std::fs::write(&target, "{}").expect("seed");
+        std::os::unix::fs::symlink(&target, dir.path().join("settings.json")).expect("symlink");
 
-        assert!(err.contains("gemini/settings.json too large"));
+        let err = config_set_at(
+            dir.path(),
+            GeminiConfigPatch {
+                notifications: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("symlink"), "{err}");
+        assert_eq!(std::fs::read_to_string(&target).expect("read"), "{}");
     }
 }

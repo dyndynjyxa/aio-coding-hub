@@ -174,6 +174,8 @@ describe("cli-manager tabs (coverage)", () => {
         geminiConfigSaving={false}
         geminiInfo={null}
         geminiConfig={null}
+        geminiModels={null}
+        geminiModelsError={false}
         refreshGeminiInfo={vi.fn()}
         persistGeminiConfig={vi.fn()}
       />

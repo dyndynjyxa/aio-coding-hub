@@ -642,9 +642,9 @@ describe("components/cli-manager/WslSettingsCard", () => {
     // Open advanced section (details content is hidden from accessibility tree when collapsed).
     fireEvent.click(screen.getByText("高级选项（地址兜底）"));
 
-    // Enable custom host address mode (second switch — first is "自动同步配置").
+    // Enable custom host address mode (third switch — after "自动同步配置" and the Gemini target).
     const switches = screen.getAllByRole("switch", { hidden: true });
-    fireEvent.click(switches[1]);
+    fireEvent.click(switches[2]);
 
     await waitFor(() => {
       expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith({
@@ -702,10 +702,10 @@ describe("components/cli-manager/WslSettingsCard", () => {
 
     render(<WslSettingsCard available={true} saving={false} settings={settings} />);
 
-    // Open advanced section and enable custom mode (second switch).
+    // Open advanced section and enable custom mode (third switch).
     fireEvent.click(screen.getByText("高级选项（地址兜底）"));
     const switches = screen.getAllByRole("switch", { hidden: true });
-    fireEvent.click(switches[1]);
+    fireEvent.click(switches[2]);
     await waitFor(() => {
       expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({ wsl_host_address_mode: "custom" })
@@ -998,5 +998,68 @@ describe("components/cli-manager/WslSettingsCard", () => {
     await waitFor(() => {
       expect(toast).toHaveBeenCalledWith("更新失败：请稍后重试");
     });
+  });
+
+  it("opts WSL into Gemini gateway takeover explicitly, keeping other targets", async () => {
+    const settingsSetMutation = { isPending: false, mutateAsync: vi.fn() };
+    settingsSetMutation.mutateAsync
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("no"));
+    vi.mocked(useSettingsPatchMutation).mockReturnValue(settingsSetMutation as any);
+    vi.mocked(useAppAboutQuery).mockReturnValue({ data: { os: "windows" } } as any);
+    vi.mocked(useWslOverviewQuery).mockReturnValue({
+      data: { detection: { detected: true, distros: ["Ubuntu"] }, hostIp: null, statusRows: [] },
+      isFetched: true,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useWslConfigureClientsMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+
+    const settings = {
+      gateway_listen_mode: "wsl_auto",
+      wsl_auto_config: true,
+      wsl_target_cli: { claude: true, codex: false, gemini: false },
+      codex_home_mode: "user_home_default",
+      codex_home_override: "",
+      wsl_host_address_mode: "auto",
+      wsl_custom_host_address: "127.0.0.1",
+    } as any;
+    const { rerender } = render(
+      <WslSettingsCard available={true} saving={false} settings={settings} />
+    );
+
+    const geminiSwitch = screen.getByRole("switch", { name: "WSL 中的 Gemini（Antigravity CLI）" });
+    expect(geminiSwitch).not.toBeChecked();
+    expect(screen.getByText(/不会修改 WSL 内的 Antigravity 配置/)).toBeInTheDocument();
+
+    fireEvent.click(geminiSwitch);
+    await waitFor(() => {
+      expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith({
+        wsl_target_cli: { claude: true, codex: false, gemini: true },
+      });
+    });
+    expect(toast).toHaveBeenCalledWith("已保存");
+
+    vi.mocked(toast).mockClear();
+    fireEvent.click(geminiSwitch);
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("更新失败：请稍后重试"));
+
+    rerender(
+      <WslSettingsCard
+        available={true}
+        saving={true}
+        settings={{ ...settings, wsl_target_cli: { ...settings.wsl_target_cli, gemini: true } }}
+      />
+    );
+    const enabledSwitch = screen.getByRole("switch", {
+      name: "WSL 中的 Gemini（Antigravity CLI）",
+    });
+    expect(enabledSwitch).toBeChecked();
+    expect(enabledSwitch).toBeDisabled();
+    expect(screen.getByText(/~\/\.gemini\/config\/config\.json/)).toBeInTheDocument();
+    expect(screen.getByText(/MCP、提示词和 Skills 同步/)).toBeInTheDocument();
   });
 });

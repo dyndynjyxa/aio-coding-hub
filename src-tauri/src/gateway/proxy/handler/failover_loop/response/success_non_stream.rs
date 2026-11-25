@@ -205,6 +205,7 @@ enum NonStreamBodyReadError {
     Timeout,
     ReadError,
     TooLarge,
+    InvalidCatalog,
 }
 
 impl NonStreamBodyReadError {
@@ -213,6 +214,7 @@ impl NonStreamBodyReadError {
             Self::Timeout => "timeout",
             Self::ReadError => "read_error",
             Self::TooLarge => "too_large",
+            Self::InvalidCatalog => "invalid_catalog",
         }
     }
 
@@ -220,13 +222,17 @@ impl NonStreamBodyReadError {
         match self {
             Self::Timeout => GatewayErrorCode::UpstreamTimeout.as_str(),
             Self::ReadError => GatewayErrorCode::UpstreamReadError.as_str(),
-            Self::TooLarge => GatewayErrorCode::UpstreamBodyReadError.as_str(),
+            Self::TooLarge | Self::InvalidCatalog => {
+                GatewayErrorCode::UpstreamBodyReadError.as_str()
+            }
         }
     }
 
     fn decision(self, retry_index: u32, max_attempts_per_provider: u32) -> FailoverDecision {
         match self {
-            Self::Timeout | Self::TooLarge => FailoverDecision::SwitchProvider,
+            Self::Timeout | Self::TooLarge | Self::InvalidCatalog => {
+                FailoverDecision::SwitchProvider
+            }
             Self::ReadError if retry_index < max_attempts_per_provider => {
                 FailoverDecision::RetrySameProvider
             }
@@ -238,6 +244,7 @@ impl NonStreamBodyReadError {
         match self {
             Self::Timeout => "failed to read upstream body: timeout".to_string(),
             Self::ReadError => "failed to read upstream body".to_string(),
+            Self::InvalidCatalog => "upstream returned an invalid Gemini model catalog".to_string(),
             Self::TooLarge => format!(
                 "upstream body exceeded gateway non-stream transform buffer limit ({} bytes)",
                 limit_bytes
@@ -343,7 +350,9 @@ fn translate_cx2cc_non_stream_body(
     Ok(Bytes::from(encoded))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_success_non_stream<R>(
+    gemini_catalog_policy: Option<&crate::providers::ProviderModelPolicyV1>,
     ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
@@ -403,11 +412,13 @@ where
 
     strip_hop_headers(&mut response_headers);
     let cx2cc_buffered_event_stream = cx2cc_active && is_event_stream(&response_headers);
-    if should_passthrough_non_stream_success(
-        gemini_oauth_response_mode,
-        cx2cc_buffered_event_stream,
-        cx2cc_active,
-    ) {
+    if gemini_catalog_policy.is_none()
+        && should_passthrough_non_stream_success(
+            gemini_oauth_response_mode,
+            cx2cc_buffered_event_stream,
+            cx2cc_active,
+        )
+    {
         let should_gunzip = has_gzip_content_encoding(&response_headers);
 
         match resp.content_length() {
@@ -627,7 +638,25 @@ where
         upstream_request_timeout_non_streaming,
         MAX_NON_SSE_BODY_BYTES,
     )
-    .await;
+    .await
+    .and_then(|bytes| {
+        let Some(policy) = gemini_catalog_policy else {
+            return Ok(bytes);
+        };
+        let bytes = maybe_gunzip_response_body_bytes_with_limit(
+            bytes,
+            &mut response_headers,
+            MAX_NON_SSE_BODY_BYTES,
+        );
+        let catalog = gemini_catalog::project_upstream(&bytes, policy)
+            .ok_or(NonStreamBodyReadError::InvalidCatalog)?;
+        response_headers.remove(header::CONTENT_LENGTH);
+        response_headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        Ok(catalog)
+    });
 
     let mut body_bytes = match bytes_result {
         Ok(b) => {
@@ -1227,7 +1256,7 @@ where
             last.circuit_failure_count = Some(change.after.failure_count);
             last.circuit_failure_threshold = Some(change.after.failure_threshold);
         }
-        if (200..300).contains(&status.as_u16()) {
+        if (200..300).contains(&status.as_u16()) && gemini_catalog_policy.is_none() {
             if let Some(session_id) = common.session_id.as_deref() {
                 state.session.bind_success(
                     &common.cli_key,

@@ -43,7 +43,7 @@ pub struct WslConfigureReport {
     pub distros: Vec<WslConfigureDistroReport>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WslCliBackup {
     pub cli_key: String,
     /// Keys injected by AIO and the values written.

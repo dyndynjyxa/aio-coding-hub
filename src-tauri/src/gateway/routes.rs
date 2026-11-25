@@ -158,6 +158,9 @@ where
 #[allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
 mod tests {
     mod alpha_search;
+    #[cfg(target_os = "macos")]
+    mod antigravity_cli;
+    mod gemini_model_catalog;
 
     use super::build_router;
     use crate::app::plugins::{official, runtime_executor::RuntimeGatewayPluginExecutor};

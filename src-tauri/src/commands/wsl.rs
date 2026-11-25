@@ -120,6 +120,7 @@ pub(crate) async fn wsl_host_address_get() -> Option<String> {
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn wsl_config_status_get(
+    app: tauri::AppHandle,
     distros: Option<Vec<String>>,
 ) -> Vec<wsl::WslDistroConfigStatus> {
     let distros = match normalize_wsl_config_status_distros(distros) {
@@ -145,7 +146,7 @@ pub(crate) async fn wsl_config_status_get(
                 }
             };
 
-            Ok(wsl::get_config_status(&distros))
+            Ok(wsl::get_config_status(&app, &distros))
         },
     )
     .await

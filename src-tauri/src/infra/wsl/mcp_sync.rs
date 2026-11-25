@@ -5,8 +5,8 @@ use crate::shared::error::AppResult;
 use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic};
 
 use super::shell::{
-    bash_single_quote, read_wsl_file_with_max_len, run_wsl_bash_script_capture, write_wsl_file,
-    wsl_resolve_codex_home_script,
+    bash_single_quote, read_wsl_file_with_max_len, remove_wsl_file, run_wsl_bash_script_capture,
+    write_wsl_file, wsl_resolve_codex_home_script,
 };
 
 const WSL_MCP_SYNC_TARGET_MAX_BYTES: usize = 1024 * 1024;
@@ -33,10 +33,12 @@ struct WslMcpManifest {
     cli_key: String,
     managed_keys: Vec<String>,
     updated_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
 }
 
-fn wsl_mcp_manifest_path(
-    app: &tauri::AppHandle,
+fn wsl_mcp_manifest_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     distro: &str,
     cli_key: &str,
 ) -> AppResult<std::path::PathBuf> {
@@ -47,66 +49,50 @@ fn wsl_mcp_manifest_path(
     Ok(dir.join("manifest.json"))
 }
 
-pub(super) fn read_wsl_mcp_manifest(
-    app: &tauri::AppHandle,
-    distro: &str,
-    cli_key: &str,
-) -> Vec<String> {
-    let path = match wsl_mcp_manifest_path(app, distro, cli_key) {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
-    let bytes = match read_optional_file_with_max_len(&path, WSL_MCP_SYNC_MANIFEST_MAX_BYTES) {
-        Ok(Some(b)) => b,
-        Ok(None) | Err(_) => return Vec::new(),
-    };
-    match serde_json::from_slice::<WslMcpManifest>(&bytes) {
-        Ok(m) => m.managed_keys,
-        Err(_) => Vec::new(),
-    }
-}
-
-pub(super) fn write_wsl_mcp_manifest(
-    app: &tauri::AppHandle,
-    distro: &str,
-    cli_key: &str,
-    managed_keys: &[String],
-) -> AppResult<()> {
-    let path = wsl_mcp_manifest_path(app, distro, cli_key)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create wsl-mcp-sync dir: {e}"))?;
-    }
-    let manifest = WslMcpManifest {
-        distro: distro.to_string(),
-        cli_key: cli_key.to_string(),
-        managed_keys: managed_keys.to_vec(),
-        updated_at: crate::shared::time::now_unix_seconds(),
-    };
-    let json = serde_json::to_string_pretty(&manifest)
-        .map_err(|e| format!("failed to serialize wsl mcp manifest: {e}"))?;
-    ensure_wsl_mcp_sync_bytes_within_limit(
-        json.as_bytes(),
-        WSL_MCP_SYNC_MANIFEST_MAX_BYTES,
-        "WSL MCP manifest",
-    )?;
-    write_file_atomic(&path, json.as_bytes())?;
-    Ok(())
-}
-
 // ── WSL MCP sync ──
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct WslMcpSyncResult {
+    pub(super) count: usize,
+    pub(super) legacy_cleanup_skipped: bool,
+}
 
 /// Sync MCP configuration for a single CLI to a WSL distro.
 /// Uses the existing `build_next_bytes` to merge servers into the config.
-pub(super) fn sync_wsl_mcp_for_cli(
+pub(super) fn sync_wsl_mcp_for_cli<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     distro: &str,
     cli_key: &str,
     servers: &[McpServerForSync],
-    managed_keys: &[String],
-) -> AppResult<Vec<String>> {
+) -> AppResult<Option<WslMcpSyncResult>> {
     if !matches!(cli_key, "claude" | "codex" | "gemini") {
         return Err(format!("unknown cli_key: {cli_key}").into());
     }
+    let manifest_path = wsl_mcp_manifest_path(app, distro, cli_key)?;
+    let record = read_optional_file_with_max_len(&manifest_path, WSL_MCP_SYNC_MANIFEST_MAX_BYTES)
+        .and_then(|raw| {
+            raw.map(|bytes| {
+                let manifest: WslMcpManifest = serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("WSL MCP manifest is invalid: {e}"))?;
+                Ok((bytes, manifest))
+            })
+            .transpose()
+        });
+    // Only Gemini needs an intact ownership journal to migrate between two files.
+    let record = if cli_key == "gemini" {
+        record?
+    } else {
+        record.unwrap_or(None)
+    };
+    let previous = record.as_ref().map(|(_, m)| m);
+    let owned = previous.map_or(&[][..], |m| m.managed_keys.as_slice());
+    if owned.is_empty() && servers.is_empty() {
+        return Ok(None);
+    }
+
+    // A pre-Antigravity manifest owns keys in settings.json, never the new file.
+    let migrating = cli_key == "gemini" && previous.is_some_and(|m| m.target.is_none());
+    let managed = if migrating { &[][..] } else { owned };
 
     // Resolve the config file path inside WSL (handles CODEX_HOME, etc.)
     let resolve_script = format!(
@@ -118,36 +104,130 @@ export HOME
 case {cli_key} in
   claude) echo "$HOME/.claude.json" ;;
   codex) echo "$p/config.toml" ;;
-  gemini) echo "$HOME/.gemini/settings.json" ;;
+  gemini)
+    agy_mcp="$HOME/.gemini/config/mcp_config.json"
+    if [ -L "$agy_mcp" ] || {{ [ -e "$agy_mcp" ] && [ ! -f "$agy_mcp" ]; }}; then
+      echo "WSL MCP: config must be a regular file" >&2
+      exit 1
+    fi
+    old="$HOME/.gemini/settings.json"
+    if [ "{migrate}" = true ] && {{ [ -L "$old" ] || {{ [ -e "$old" ] && [ ! -f "$old" ]; }}; }}; then
+      echo AIO_WSL_LEGACY_UNSAFE
+    fi
+    echo "$agy_mcp" ;;
+
 esac
 "#,
         resolver = wsl_resolve_codex_home_script("p"),
+        migrate = migrating && !owned.is_empty(),
         cli_key = bash_single_quote(cli_key)
     );
 
     let resolved_path = run_wsl_bash_script_capture(distro, &resolve_script)?;
-    let resolved_path = resolved_path.trim();
+    let (mut legacy_cleanup_skipped, resolved_path) =
+        match resolved_path.trim().strip_prefix("AIO_WSL_LEGACY_UNSAFE\n") {
+            Some(path) => (true, path),
+            None => (false, resolved_path.trim()),
+        };
 
-    // Read current config from WSL
     let current = read_wsl_file_with_max_len(distro, resolved_path, WSL_MCP_SYNC_TARGET_MAX_BYTES)?;
+    let (next, keys) = if cli_key == "gemini" {
+        let merge = crate::mcp_sync::merge_antigravity_mcp(current.clone(), managed, servers)?;
+        (merge.bytes, merge.managed_keys)
+    } else {
+        let next = crate::mcp_sync::build_next_bytes(cli_key, current.clone(), managed, servers)
+            .map_err(|e| format!("WSL MCP build failed for {cli_key}: {e}"))?;
+        let mut keys: Vec<_> = servers.iter().map(|s| s.server_key.clone()).collect();
+        keys.sort();
+        keys.dedup();
+        (next, keys)
+    };
+    ensure_wsl_mcp_sync_bytes_within_limit(&next, WSL_MCP_SYNC_TARGET_MAX_BYTES, "WSL MCP target")?;
 
-    // Build merged config using existing infrastructure
-    let next_bytes = crate::mcp_sync::build_next_bytes(cli_key, current, managed_keys, servers)
-        .map_err(|e| format!("WSL MCP build failed for {cli_key}: {e}"))?;
+    let mut legacy = if migrating && !owned.is_empty() && !legacy_cleanup_skipped {
+        let prefix = resolved_path
+            .strip_suffix("/config/mcp_config.json")
+            .ok_or("WSL MCP: unexpected Antigravity target")?;
+        let path = format!("{prefix}/settings.json");
+        let cleanup = read_wsl_file_with_max_len(distro, &path, WSL_MCP_SYNC_TARGET_MAX_BYTES)
+            .and_then(|bytes| {
+                if let Some(old) = bytes {
+                    Ok(crate::mcp_sync::release_legacy_entries(&old, None, owned)?
+                        .map(|next| (path, old, next)))
+                } else {
+                    Ok(None)
+                }
+            });
+        match cleanup {
+            Ok(plan) => plan,
+            Err(_) => {
+                legacy_cleanup_skipped = true;
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let manifest = WslMcpManifest {
+        distro: distro.into(),
+        cli_key: cli_key.into(),
+        managed_keys: keys,
+        updated_at: crate::shared::time::now_unix_seconds(),
+        target: (cli_key == "gemini").then(|| "antigravity".into()),
+    };
+    let json =
+        serde_json::to_vec_pretty(&manifest).map_err(|e| format!("WSL MCP manifest: {e}"))?;
     ensure_wsl_mcp_sync_bytes_within_limit(
-        &next_bytes,
-        WSL_MCP_SYNC_TARGET_MAX_BYTES,
-        "WSL MCP target",
+        &json,
+        WSL_MCP_SYNC_MANIFEST_MAX_BYTES,
+        "WSL MCP manifest",
     )?;
 
-    // Write back to WSL
-    write_wsl_file(distro, resolved_path, &next_bytes)?;
-
-    // Return list of keys we now manage
-    let mut keys: Vec<String> = servers.iter().map(|s| s.server_key.clone()).collect();
-    keys.sort();
-    keys.dedup();
-    Ok(keys)
+    let write_target =
+        (!migrating || !servers.is_empty()) && current.as_deref() != Some(next.as_slice());
+    if migrating {
+        // Release the old keys first. A restart before switching the manifest
+        // can retry that cleanup. Once it switches, the next sync owns the new keys.
+        if let Some((path, _, bytes)) = &legacy {
+            if write_wsl_file(distro, path, bytes).is_err() {
+                legacy_cleanup_skipped = true;
+                legacy = None;
+            }
+        }
+        let apply = || -> AppResult<()> {
+            write_file_atomic(&manifest_path, &json)?;
+            if write_target {
+                write_wsl_file(distro, resolved_path, &next)?;
+            }
+            Ok(())
+        };
+        if let Err(error) = apply() {
+            if let Some((path, old, _)) = &legacy {
+                write_wsl_file(distro, path, old)?;
+            }
+            if let Some((original, _)) = &record {
+                write_file_atomic(&manifest_path, original)?;
+            }
+            return Err(error);
+        }
+    } else {
+        if write_target {
+            write_wsl_file(distro, resolved_path, &next)?;
+        }
+        if let Err(error) = write_file_atomic(&manifest_path, &json) {
+            if write_target {
+                match current {
+                    Some(bytes) => write_wsl_file(distro, resolved_path, &bytes)?,
+                    None => remove_wsl_file(distro, resolved_path)?,
+                }
+            }
+            return Err(error);
+        }
+    }
+    Ok(Some(WslMcpSyncResult {
+        count: manifest.managed_keys.len(),
+        legacy_cleanup_skipped,
+    }))
 }
 
 #[cfg(test)]

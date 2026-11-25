@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use super::claude_json::build_claude_config_json;
 use super::codex_toml::build_codex_config_toml;
 use super::fs::{read_optional_file_with_max_len, write_file_atomic, write_file_atomic_if_changed};
-use super::gemini_json::build_gemini_settings_json;
+use super::gemini_json::{merge_antigravity_mcp, release_legacy_entries};
 use super::grok_toml::apply_grok_mcp_servers;
 use super::manifest::{backup_for_enable, read_manifest, write_manifest};
 use super::paths::{
@@ -72,16 +72,15 @@ impl McpRebindSnapshots {
     fn capture<R: tauri::Runtime>(
         app: &tauri::AppHandle<R>,
         cli_key: &'static str,
-        previous_manifest: &super::manifest::McpSyncManifest,
+        old_path: &Path,
         new_path: &Path,
     ) -> Result<Self, String> {
         let root = mcp_sync_root_dir(app, cli_key)?;
         let backup_path = mcp_sync_files_dir(&root).join(backup_file_name(cli_key));
         let manifest_path = mcp_sync_manifest_path(&root);
-        let old_path = PathBuf::from(&previous_manifest.file.path);
         Ok(Self {
             cli_key,
-            old_bytes: read_config_bytes(cli_key, &old_path)?,
+            old_bytes: read_config_bytes(cli_key, old_path)?,
             new_bytes: read_config_bytes(cli_key, new_path)?,
             backup_bytes: read_optional_file_with_max_len(
                 &backup_path,
@@ -91,7 +90,7 @@ impl McpRebindSnapshots {
                 &manifest_path,
                 super::MCP_SYNC_MANIFEST_MAX_BYTES,
             )?,
-            old_path,
+            old_path: old_path.to_owned(),
             new_path: new_path.to_path_buf(),
             backup_path,
             manifest_path,
@@ -147,7 +146,7 @@ pub(crate) fn build_next_bytes(
             build_claude_config_json(current, managed_keys, servers)
         }
         "codex" => build_codex_config_toml(current, managed_keys, servers),
-        "gemini" => build_gemini_settings_json(current, managed_keys, servers),
+        "gemini" => Ok(merge_antigravity_mcp(current, managed_keys, servers)?.bytes),
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
     }
 }
@@ -166,7 +165,12 @@ fn rebind_grok_mcp<R: tauri::Runtime>(
     desired_keys: Vec<String>,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
-    let snapshots = McpRebindSnapshots::capture(app, "grok", &previous_manifest, target_path)?;
+    let snapshots = McpRebindSnapshots::capture(
+        app,
+        "grok",
+        Path::new(&previous_manifest.file.path),
+        target_path,
+    )?;
     let apply = || -> Result<(), String> {
         if snapshots.old_bytes.is_some() {
             crate::grok_config::mutate_path(&snapshots.old_path, |document| {
@@ -205,8 +209,12 @@ fn rebind_desktop_mcp<R: tauri::Runtime>(
     desired_keys: Vec<String>,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
-    let snapshots =
-        McpRebindSnapshots::capture(app, "claude_desktop", &previous_manifest, target_path)?;
+    let snapshots = McpRebindSnapshots::capture(
+        app,
+        "claude_desktop",
+        Path::new(&previous_manifest.file.path),
+        target_path,
+    )?;
     let apply = || -> Result<(), String> {
         if let Some(old_bytes) = snapshots.old_bytes.clone() {
             let next_bytes = build_next_bytes(
@@ -241,6 +249,143 @@ fn rebind_desktop_mcp<R: tauri::Runtime>(
     }
 }
 
+pub(crate) fn warn_antigravity_mcp<R: tauri::Runtime>(app: &tauri::AppHandle<R>, message: String) {
+    tracing::warn!("{message}");
+    if let Ok(notice) = crate::notice::build(
+        crate::notice::NoticeLevel::Warning,
+        Some("Antigravity MCP".into()),
+        message,
+    ) {
+        let _ = crate::notice::emit(app, notice);
+    }
+}
+
+fn retire_legacy_mcp<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    path: &Path,
+    ownership: &super::manifest::LegacyGeminiOwnership,
+) -> Result<(), String> {
+    if ownership.managed_keys.is_empty()
+        || crate::shared::fs::regular_file_metadata(path)?.is_none()
+    {
+        return Ok(());
+    }
+    let old = super::fs::read_file_with_max_len(path, super::MCP_SYNC_TARGET_MAX_BYTES)?;
+    let backup = if ownership.existed {
+        let path = mcp_sync_files_dir(&mcp_sync_root_dir(app, "gemini")?).join("settings.json");
+        crate::shared::fs::regular_file_metadata(&path)?;
+        Some(super::fs::read_file_with_max_len(
+            &path,
+            super::MCP_SYNC_TARGET_MAX_BYTES,
+        )?)
+    } else {
+        None
+    };
+    if let Some(next) = release_legacy_entries(&old, backup.as_deref(), &ownership.managed_keys)? {
+        super::fs::write_config_file("gemini", path, &next)?;
+    }
+    Ok(())
+}
+
+fn sync_antigravity_mcp<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    previous: Option<super::manifest::McpSyncManifest>,
+    target: &Path,
+    servers: &[McpServerForSync],
+) -> Result<(), String> {
+    crate::shared::fs::regular_file_metadata(target)?;
+    let legacy = super::paths::home_dir(app)?.join(".gemini/settings.json");
+    let current_manifest = previous
+        .as_ref()
+        .filter(|m| m.enabled && Path::new(&m.file.path) == target);
+    let owned = current_manifest.map_or(&[][..], |m| m.managed_keys.as_slice());
+    let current = read_config_bytes("gemini", target)?;
+    let merged = merge_antigravity_mcp(current, owned, servers)?;
+    let rebind = previous
+        .as_ref()
+        .filter(|m| m.enabled && Path::new(&m.file.path) != target);
+    let retiring = match rebind {
+        Some(m) if Path::new(&m.file.path) == legacy => {
+            Some(super::manifest::LegacyGeminiOwnership {
+                existed: m.file.existed,
+                managed_keys: m.managed_keys.clone(),
+            })
+        }
+        Some(_) => {
+            warn_antigravity_mcp(
+                app,
+                "旧 MCP 清单记录的路径无法识别，已保留原文件。请检查旧 Gemini 配置中的 MCP 服务。"
+                    .into(),
+            );
+            None
+        }
+        None => current_manifest.and_then(|m| m.pending_legacy_gemini.clone()),
+    };
+
+    let should_write = !merged.managed_keys.is_empty() || !owned.is_empty();
+    let mut manifest = match current_manifest {
+        Some(m) => m.clone(),
+        None => backup_for_enable(app, "gemini", previous)?,
+    };
+    // Journal the new ownership before installing it. A retry must never take
+    // the already-installed file as the user's original backup.
+    manifest.pending_legacy_gemini = retiring;
+    let installed_keys = manifest.managed_keys.clone();
+    manifest
+        .managed_keys
+        .extend(merged.managed_keys.iter().cloned());
+    manifest.managed_keys.sort();
+    manifest.managed_keys.dedup();
+    write_manifest(app, "gemini", &manifest)?;
+    if should_write {
+        if let Err(error) = super::fs::write_config_file("gemini", target, &merged.bytes) {
+            // The atomic install failed. Keep the original backup and pending
+            // migration, but never claim names the user could now add locally.
+            manifest.managed_keys = installed_keys;
+            write_manifest(app, "gemini", &manifest)?;
+            return Err(error.into());
+        }
+    }
+    if let Some(old) = manifest.pending_legacy_gemini.take() {
+        if let Err(error) = retire_legacy_mcp(app, &legacy, &old) {
+            warn_antigravity_mcp(app, format!("已保留旧 Gemini MCP 设置。请手动检查 ~/.gemini/settings.json 中原由 AIO 管理的条目。{error}"));
+        }
+    }
+    manifest.managed_keys = merged.managed_keys;
+    manifest.updated_at = now_unix_seconds();
+    write_manifest(app, "gemini", &manifest)?;
+    Ok(())
+}
+
+pub(crate) fn antigravity_rebind_needed<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    let target = mcp_target_path(app, "gemini")?;
+    Ok(read_manifest(app, "gemini")?.is_some_and(|m| {
+        m.enabled && (m.pending_legacy_gemini.is_some() || Path::new(&m.file.path) != target)
+    }))
+}
+
+pub(crate) fn legacy_antigravity_snapshot<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Option<(PathBuf, Vec<u8>)>, String> {
+    let Some(m) = read_manifest(app, "gemini")? else {
+        return Ok(None);
+    };
+    let path = super::paths::home_dir(app)?.join(".gemini/settings.json");
+    if !m.enabled || (Path::new(&m.file.path) != path && m.pending_legacy_gemini.is_none()) {
+        return Ok(None);
+    }
+    // Retirement will also leave a symlink, oversized or unreadable file alone.
+    let old = (|| -> Result<_, String> {
+        crate::shared::fs::regular_file_metadata(&path)?;
+        read_config_bytes("gemini", &path)
+    })()
+    .ok()
+    .flatten();
+    Ok(old.map(|b| (path, b)))
+}
+
 pub fn sync_cli<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -258,6 +403,16 @@ pub fn sync_cli<R: tauri::Runtime>(
         }
     }
 
+    static ANTIGRAVITY_SYNC: Mutex<()> = Mutex::new(());
+    let _antigravity_guard = if cli_key == "gemini" {
+        Some(
+            ANTIGRAVITY_SYNC
+                .lock()
+                .map_err(|_| "ANTIGRAVITY_MCP_SYNC_LOCK_POISONED")?,
+        )
+    } else {
+        None
+    };
     let _grok_guard = if cli_key == "grok" {
         Some(grok_mcp_sync_lock()?)
     } else {
@@ -266,10 +421,12 @@ pub fn sync_cli<R: tauri::Runtime>(
     let target_path = mcp_target_path(app, cli_key)?;
 
     let existing = read_manifest(app, cli_key)?;
-    if cli_key == "claude_desktop" && existing.is_none() && servers.is_empty() {
-        // Global MCP refreshes must not create or rewrite Desktop's config
-        // until the user actually manages a Desktop MCP server through AIO.
+    if matches!(cli_key, "claude_desktop" | "gemini") && existing.is_none() && servers.is_empty() {
+        // A global refresh should only create these client files when needed.
         return Ok(());
+    }
+    if cli_key == "gemini" {
+        return sync_antigravity_mcp(app, existing, &target_path, servers);
     }
     let desired_keys = normalized_keys(servers);
     if let Some(manifest) = existing.as_ref().filter(|manifest| manifest.enabled) {
@@ -313,7 +470,7 @@ pub fn sync_cli<R: tauri::Runtime>(
         let current =
             read_optional_file_with_max_len(&target_path, super::MCP_SYNC_TARGET_MAX_BYTES)?;
         let next_bytes = build_next_bytes(cli_key, current, &managed_keys, servers)?;
-        write_file_atomic_if_changed(&target_path, &next_bytes)?;
+        super::fs::write_config_file(cli_key, &target_path, &next_bytes)?;
     }
 
     manifest.enabled = true;
@@ -452,6 +609,372 @@ mod tests {
             cwd: None,
             url: None,
             headers: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn antigravity_migrates_owned_keys_only_and_preserves_original_backups() {
+        let test = GrokMcpTestApp::new();
+        let app = test.handle();
+        let legacy = test._home.path().join(".gemini/settings.json");
+        let target = test._home.path().join(".gemini/config/mcp_config.json");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let initial = br#"{"mcpServers":{"managed":{"command":"preexisting"}}}"#;
+        let old = br#"{"other":true,"mcpServers":{"managed":{"command":"aio-old"},"unmanaged":{"httpUrl":"old-local"}}}"#;
+        std::fs::write(&legacy, old).unwrap();
+        let root = mcp_sync_root_dir(&app, "gemini").unwrap();
+        let backups = mcp_sync_files_dir(&root);
+        std::fs::create_dir_all(&backups).unwrap();
+        std::fs::write(backups.join("settings.json"), initial).unwrap();
+        let original_manifest = serde_json::json!({
+            "schema_version":1,"managed_by":"aio-coding-hub","cli_key":"gemini","enabled":true,"created_at":0,"updated_at":0,
+            "file":{"path":legacy,"existed":true,"backup_rel":"settings.json"},"managed_keys":["managed"]
+        });
+        std::fs::write(mcp_sync_manifest_path(&root), original_manifest.to_string()).unwrap();
+
+        let agy_original = br#"{"mcpServers":{"user-server":{"command":"keep","disabled":true}}}"#;
+        std::fs::write(&target, agy_original).unwrap();
+        let before = crate::mcp::SingleCliBackup::capture(&app, "gemini").unwrap();
+        let mut server = stdio_server();
+        server.transport = "http".into();
+        server.url = Some("https://example.test/mcp".into());
+        server.headers.insert("X-Test".into(), "value".into());
+        sync_cli(&app, "gemini", &[server.clone()]).unwrap();
+        let old_json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&legacy).unwrap()).unwrap();
+        assert_eq!(old_json["mcpServers"]["managed"]["command"], "preexisting");
+        assert_eq!(old_json["mcpServers"]["unmanaged"]["httpUrl"], "old-local");
+        assert_eq!(old_json["other"], true);
+        let agy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+        assert_eq!(
+            agy["mcpServers"]["managed"],
+            serde_json::json!({"serverUrl":"https://example.test/mcp", "headers":{"X-Test":"value"}})
+        );
+        assert_eq!(agy["mcpServers"]["user-server"]["disabled"], true);
+        assert_eq!(
+            std::fs::read(backups.join("settings.json")).unwrap(),
+            initial
+        );
+        assert_eq!(
+            std::fs::read(backups.join("mcp_config.json")).unwrap(),
+            agy_original
+        );
+        // Resume after config installation but before the migration commit. Keep
+        // the original new-target backup even when the requested keys have changed.
+        let mut pending = read_manifest(&app, "gemini").unwrap().unwrap();
+        pending.pending_legacy_gemini = Some(super::super::manifest::LegacyGeminiOwnership {
+            existed: true,
+            managed_keys: vec!["managed".into()],
+        });
+        write_manifest(&app, "gemini", &pending).unwrap();
+        std::fs::write(&legacy, old).unwrap();
+        assert!(antigravity_rebind_needed(&app).unwrap());
+        sync_cli(&app, "gemini", &[]).unwrap();
+        assert!(!antigravity_rebind_needed(&app).unwrap());
+        assert_eq!(
+            std::fs::read(backups.join("mcp_config.json")).unwrap(),
+            agy_original
+        );
+        sync_cli(&app, "gemini", &[server]).unwrap();
+        sync_cli(&app, "gemini", &[]).unwrap();
+        let removed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+        assert_eq!(
+            removed,
+            serde_json::from_slice::<serde_json::Value>(agy_original).unwrap()
+        );
+        // A workspace/config DB transaction can still fail after the file migration succeeds.
+        before.restore(&app, "gemini");
+        assert_eq!(std::fs::read(&legacy).unwrap(), old);
+        assert_eq!(std::fs::read(&target).unwrap(), agy_original);
+        assert!(antigravity_rebind_needed(&app).unwrap());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(backups.join("mcp_config.json"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o077,
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn antigravity_takes_over_same_name_entries_and_removes_them_when_disabled() {
+        let test = GrokMcpTestApp::new();
+        let app = test.handle();
+        let target = mcp_target_path(&app, "gemini").unwrap();
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let local = serde_json::json!({"mcpServers":{
+            "conflict":{"command":"user-only"},
+            "off":{"url":"https://old.test","disabled":true,"oauth":{"native":true}},
+            "keep":{"command":"mine"}}});
+        std::fs::write(&target, format!("\u{feff}{local}")).unwrap();
+        let named = |key: &str| McpServerForSync {
+            server_key: key.into(),
+            ..stdio_server()
+        };
+        let read = || {
+            super::super::parse_antigravity_mcp_root(Some(&std::fs::read(&target).unwrap()))
+                .unwrap()
+        };
+        let aio = serde_json::json!({"command":"npx","args":["-y","@example/mcp"]});
+
+        sync_cli(&app, "gemini", &[named("conflict"), named("off")]).unwrap();
+        let mut off = aio.clone();
+        off["oauth"] = serde_json::json!({"native":true});
+        assert_eq!(
+            read(),
+            serde_json::json!({"mcpServers":{"conflict":aio,"off":off,"keep":{"command":"mine"}}})
+        );
+        assert_eq!(
+            read_manifest(&app, "gemini").unwrap().unwrap().managed_keys,
+            ["conflict", "off"]
+        );
+
+        // Disabling one server in AIO removes it from the file.
+        sync_cli(&app, "gemini", &[named("off")]).unwrap();
+        assert!(read()["mcpServers"].get("conflict").is_none());
+        assert_eq!(read()["mcpServers"]["off"], off);
+
+        sync_cli(&app, "gemini", &[]).unwrap();
+        assert_eq!(
+            read(),
+            serde_json::json!({"mcpServers":{"keep":{"command":"mine"}}})
+        );
+        assert!(read_manifest(&app, "gemini")
+            .unwrap()
+            .unwrap()
+            .managed_keys
+            .is_empty());
+    }
+
+    #[test]
+    fn antigravity_workspace_switch_keeps_taken_over_same_name_entry() {
+        let test = GrokMcpTestApp::new();
+        let app = test.handle();
+        let db = crate::db::init_for_tests(&test._home.path().join("workspace.sqlite")).unwrap();
+        let first = crate::workspaces::create(&db, "gemini", "First", false)
+            .unwrap()
+            .id;
+        let second = crate::workspaces::create(&db, "gemini", "Second", false)
+            .unwrap()
+            .id;
+        crate::workspaces::set_active(&db.open_connection().unwrap(), first).unwrap();
+        let target = mcp_target_path(&app, "gemini").unwrap();
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let local =
+            serde_json::json!({"mcpServers":{"managed":{"command":"user","nativeOption":true}}});
+        std::fs::write(&target, local.to_string()).unwrap();
+        // The first workspace requests the same name as an existing local entry.
+        let server = stdio_server();
+        sync_cli(&app, "gemini", std::slice::from_ref(&server)).unwrap();
+        let conn = db.open_connection().unwrap();
+        conn.execute(
+            "INSERT INTO mcp_servers(server_key,name,normalized_name,transport,command,args_json,env_json,created_at,updated_at) VALUES ('managed','managed','managed','stdio','npx','[]','{}',1,1)",
+            [],
+        ).unwrap();
+        let id = conn.last_insert_rowid();
+        for ws in [first, second] {
+            conn.execute(
+                "INSERT INTO workspace_mcp_enabled(workspace_id,server_id,created_at,updated_at) VALUES (?1,?2,1,1)",
+                rusqlite::params![ws, id],
+            ).unwrap();
+        }
+        drop(conn);
+        crate::workspace_switch::apply(&app, &db, second).unwrap();
+        let read = || {
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&target).unwrap()).unwrap()
+        };
+        assert_eq!(read()["mcpServers"]["managed"]["command"], "npx");
+        crate::workspace_switch::apply(&app, &db, first).unwrap();
+        assert_eq!(read()["mcpServers"]["managed"]["command"], "npx");
+        assert_eq!(read()["mcpServers"]["managed"]["nativeOption"], true);
+        assert_eq!(
+            read_manifest(&app, "gemini").unwrap().unwrap().managed_keys,
+            ["managed"]
+        );
+    }
+
+    #[test]
+    fn antigravity_legacy_jsonc_retirement_preserves_bom_comments_and_unknown_values() {
+        let current = "\u{feff}{ // unrelated settings\r\n\"mcpServers\":{\"managed\":{\"command\":\"old\"},\"keep\":{\"url\":\"https://test//path\"},}, /* retained */ \"unrelated\":true,}";
+        let original = r#"{/* local */"command":"mine","large":1e400}"#;
+        let backup = format!(r#"{{"mcpServers":{{"managed":{original},}},}}"#);
+        let keys = ["managed".into(), "managed".into()];
+        let result = release_legacy_entries(current.as_bytes(), Some(backup.as_bytes()), &keys)
+            .unwrap()
+            .unwrap();
+        let text = String::from_utf8(result).unwrap();
+        assert_eq!(text, current.replace(r#"{"command":"old"}"#, original));
+        assert!(
+            release_legacy_entries(text.as_bytes(), Some(backup.as_bytes()), &keys)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn antigravity_retirement_skips_unprovable_legacy_files_and_clears_pending_ownership() {
+        let test = GrokMcpTestApp::new();
+        let app = test.handle();
+        let root = mcp_sync_root_dir(&app, "gemini").unwrap();
+        let target = mcp_target_path(&app, "gemini").unwrap();
+        let legacy = test._home.path().join(".gemini/settings.json");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        for case in [
+            "missing-backup",
+            "invalid-jsonc",
+            "unknown-target",
+            "symlink",
+        ] {
+            let _ = std::fs::remove_file(&legacy);
+            let _ = std::fs::remove_file(&target);
+            let original = if case == "invalid-jsonc" {
+                b"{invalid".as_slice()
+            } else {
+                br#"{"mcpServers":{"managed":{"command":"keep-legacy"}}}"#
+            };
+            let other = test._home.path().join("unowned.json");
+            std::fs::write(&other, original).unwrap();
+            if case == "symlink" {
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&other, &legacy).unwrap();
+                #[cfg(not(unix))]
+                continue;
+            } else {
+                std::fs::write(&legacy, original).unwrap();
+            }
+            let path = if case == "unknown-target" {
+                &other
+            } else {
+                &legacy
+            };
+            let record = serde_json::json!({"schema_version":1,"managed_by":"aio-coding-hub","cli_key":"gemini","enabled":true,"created_at":0,"updated_at":0,
+                 "file":{"path":path,"existed":case == "missing-backup","backup_rel":"settings.json"},"managed_keys":["managed"]});
+            std::fs::write(mcp_sync_manifest_path(&root), record.to_string()).unwrap();
+            sync_cli(&app, "gemini", &[stdio_server()]).unwrap();
+            assert!(!antigravity_rebind_needed(&app).unwrap(), "{case}");
+            assert_eq!(std::fs::read(&legacy).unwrap(), original, "{case}");
+            assert_eq!(std::fs::read(&other).unwrap(), original, "{case}");
+            assert_eq!(
+                read_manifest(&app, "gemini").unwrap().unwrap().managed_keys,
+                ["managed"]
+            );
+            assert!(target.is_file());
+        }
+    }
+
+    #[test]
+    fn antigravity_unwritable_target_does_not_roll_back_shared_mcp_changes_or_other_routes() {
+        let mut test = GrokMcpTestApp::new();
+        let home = test._home.path().to_owned();
+        test._env.set("AIO_CODING_HUB_TEST_HOME", home.clone());
+        test._env.set("CODEX_HOME", home.join(".codex"));
+        test._env.set("CLAUDE_USER_DATA_DIR", home.join("desktop"));
+        let app = test.handle();
+        let db = crate::db::init_for_tests(&home.join("shared.sqlite")).unwrap();
+        let claude = crate::workspaces::create(&db, "claude", "MCP test", false)
+            .unwrap()
+            .id;
+        let agy = crate::workspaces::create(&db, "gemini", "MCP test", false)
+            .unwrap()
+            .id;
+        {
+            let conn = db.open_connection().unwrap();
+            crate::workspaces::set_active(&conn, claude).unwrap();
+            crate::workspaces::set_active(&conn, agy).unwrap();
+        }
+        let target = mcp_target_path(&app, "gemini").unwrap();
+        let claude_file = mcp_target_path(&app, "claude").unwrap();
+        let server = crate::mcp::parse_json(
+            "\u{feff}{\"mcpServers\":{\"shared\":{\"command\":\"before\"}}}",
+        )
+        .unwrap()
+        .servers;
+        crate::mcp::import_servers(&app, &db, claude, server).unwrap();
+        let id = crate::mcp::list_for_workspace(&db, claude)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.server_key == "shared")
+            .unwrap()
+            .id;
+        crate::mcp::set_enabled(&app, &db, agy, id, true).unwrap();
+        let update = |command: &str| {
+            crate::mcp::upsert(
+                &app,
+                &db,
+                Some(id),
+                "shared",
+                "shared",
+                "stdio",
+                Some(command),
+                vec![],
+                vec![],
+                Default::default(),
+                None,
+                None,
+                vec![],
+                Default::default(),
+            )
+        };
+        std::fs::write(&target, b"{malformed").unwrap();
+        update("after").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"{malformed");
+        let read_claude = || {
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&claude_file).unwrap())
+                .unwrap()
+        };
+        assert_eq!(read_claude()["mcpServers"]["shared"]["command"], "after");
+        // Direct Gemini changes surface the error and roll back the link.
+        assert!(crate::mcp::set_enabled(&app, &db, agy, id, false).is_err());
+        assert!(
+            crate::mcp::list_for_workspace(&db, agy)
+                .unwrap()
+                .iter()
+                .find(|s| s.id == id)
+                .unwrap()
+                .enabled
+        );
+        std::fs::remove_file(&target).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        update("still-writable").unwrap();
+        assert!(target.is_dir());
+        assert_eq!(
+            read_claude()["mcpServers"]["shared"]["command"],
+            "still-writable"
+        );
+        crate::mcp::delete(&app, &db, id).unwrap();
+        assert!(read_claude()["mcpServers"].get("shared").is_none());
+        assert!(target.is_dir());
+    }
+
+    #[test]
+    fn antigravity_rejects_sse_and_malformed_json_without_modifying_user_config() {
+        let test = GrokMcpTestApp::new();
+        let app = test.handle();
+        let target = mcp_target_path(&app, "gemini").unwrap();
+        sync_cli(&app, "gemini", &[]).unwrap();
+        assert!(!target.exists());
+        let mut server = stdio_server();
+        server.transport = "sse".into();
+        assert!(sync_cli(&app, "gemini", &[server])
+            .unwrap_err()
+            .contains("SSE"));
+        assert!(!target.exists());
+
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        for raw in [b"{broken".as_slice(), br#"{"mcpServers":[]}"#] {
+            std::fs::write(&target, raw).unwrap();
+            assert!(sync_cli(&app, "gemini", &[stdio_server()])
+                .unwrap_err()
+                .contains("INVALID_CONFIG"));
+            assert_eq!(std::fs::read(&target).unwrap(), raw);
         }
     }
 

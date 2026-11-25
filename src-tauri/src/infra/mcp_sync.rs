@@ -18,9 +18,16 @@ mod paths;
 mod sync;
 mod types;
 
+pub(crate) use gemini_json::{
+    merge_antigravity_mcp, parse_mcp_root as parse_antigravity_mcp_root, release_legacy_entries,
+};
 pub(crate) use types::McpServerForSync;
 
 pub use fs::{read_target_bytes, restore_target_bytes};
+pub(crate) use manifest::{antigravity_owned_keys, relinquish_antigravity_keys};
 pub use manifest::{read_manifest_bytes, restore_manifest_bytes};
 pub use sync::sync_cli;
-pub(crate) use sync::{build_next_bytes, swap_grok_local_servers_for_workspace};
+pub(crate) use sync::{
+    antigravity_rebind_needed, build_next_bytes, legacy_antigravity_snapshot,
+    swap_grok_local_servers_for_workspace, warn_antigravity_mcp,
+};

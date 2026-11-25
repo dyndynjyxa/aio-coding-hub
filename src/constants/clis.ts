@@ -118,7 +118,7 @@ export const CLI_REGISTRY: readonly CliItem[] = [
   {
     key: "gemini",
     name: "Gemini",
-    desc: "Google Gemini CLI",
+    desc: "Antigravity CLI 与桌面版",
     capabilities: LEGACY_CLI_CAPABILITIES,
   },
   {

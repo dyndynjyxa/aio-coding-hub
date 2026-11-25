@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import type { CliKey } from "../../constants/clis";
 import {
   useMcpImportFromWorkspaceCliMutation,
   useMcpServerDeleteMutation,
@@ -18,6 +19,7 @@ import { McpServerDialog } from "./components/McpServerDialog";
 
 export type McpServersViewProps = {
   workspaceId: number;
+  cliKey: CliKey;
 };
 
 function formatImportSummary(report: McpImportReport) {
@@ -25,7 +27,7 @@ function formatImportSummary(report: McpImportReport) {
   return `导入完成：新增 ${report.inserted}，更新 ${report.updated}${skippedCount > 0 ? `，跳过 ${skippedCount}` : ""}`;
 }
 
-export function McpServersView({ workspaceId }: McpServersViewProps) {
+export function McpServersView({ workspaceId, cliKey }: McpServersViewProps) {
   const mcpServersQuery = useMcpServersListQuery(workspaceId);
   const toggleMutation = useMcpServerSetEnabledMutation(workspaceId);
   const deleteMutation = useMcpServerDeleteMutation(workspaceId);
@@ -165,6 +167,7 @@ export function McpServersView({ workspaceId }: McpServersViewProps) {
             <McpServerCard
               key={server.id}
               server={server}
+              unsupportedTransport={cliKey === "gemini" && server.transport === "sse"}
               toggling={toggling}
               onToggleEnabled={toggleEnabled}
               onEdit={handleEdit}

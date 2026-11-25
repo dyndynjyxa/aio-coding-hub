@@ -225,6 +225,7 @@ function inferTransport(spec: Record<string, unknown>): McpTransport {
 
   if (
     readString(spec.url).trim() ||
+    readString(spec.serverUrl).trim() ||
     readString(spec.httpUrl).trim() ||
     asObject(spec.headers) ||
     asObject(spec.http_headers) ||
@@ -290,7 +291,11 @@ function parseJsonDraftFallback(jsonText: string): McpDialogDraft {
     asObject(candidate.entry.server) ?? asObject(candidate.entry.spec) ?? candidate.entry;
   const transport = inferTransport(spec);
   const command = readString(spec.command).trim();
-  const url = (readString(spec.url) || readString(spec.httpUrl)).trim();
+  const url = (
+    readString(spec.url) ||
+    readString(spec.serverUrl) ||
+    readString(spec.httpUrl)
+  ).trim();
 
   if (transport === "stdio" && !command) {
     throw new Error("JSON 缺少 stdio command 字段");

@@ -29,6 +29,15 @@ pub(super) fn clean_body<R: tauri::Runtime>(
     if input.cli_key == "claude" && prepared.oauth_adapter.is_some() {
         return clean_claude_oauth_body(&prepared.upstream_body_bytes);
     }
+    if input.cli_key == "gemini" {
+        return CleanBodyOutcome {
+            body: strip_unsupported_gemini_thinking_level(
+                &prepared.upstream_forwarded_path,
+                &prepared.upstream_body_bytes,
+            ),
+            removed_empty_text_blocks: 0,
+        };
+    }
     CleanBodyOutcome {
         body: prepared.upstream_body_bytes.clone(),
         removed_empty_text_blocks: 0,
@@ -76,6 +85,36 @@ fn clean_claude_oauth_body(upstream_body_bytes: &Bytes) -> CleanBodyOutcome {
     }
 }
 
+/// Antigravity CLI sends `thinkingLevel` (a Gemini 3+ field) even to its fixed
+/// gemini-2.5 background models, which upstreams reject with 400. Drop it for
+/// pre-3 targets so the model uses its default thinking.
+fn strip_unsupported_gemini_thinking_level(forwarded_path: &str, body: &Bytes) -> Bytes {
+    let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.clone();
+    };
+    let model = crate::gateway::util::infer_requested_model_info(forwarded_path, None, Some(&json))
+        .model
+        .unwrap_or_default();
+    let model = model.strip_prefix("models/").unwrap_or(&model);
+    if !(model.starts_with("gemini-1") || model.starts_with("gemini-2")) {
+        return body.clone();
+    }
+    let mut removed = false;
+    // Code Assist (OAuth) wraps the GenAI request in `request`.
+    for pointer in [
+        "/generationConfig/thinkingConfig",
+        "/request/generationConfig/thinkingConfig",
+    ] {
+        if let Some(config) = json.pointer_mut(pointer).and_then(|v| v.as_object_mut()) {
+            removed |= config.remove("thinkingLevel").is_some();
+        }
+    }
+    if !removed {
+        return body.clone();
+    }
+    serde_json::to_vec(&json).map_or_else(|_| body.clone(), Bytes::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +141,70 @@ mod tests {
         let cleaned: serde_json::Value = serde_json::from_slice(&outcome.body).unwrap();
         let content = cleaned["messages"][0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
+    }
+
+    #[test]
+    fn gemini_thinking_level_is_stripped_only_for_pre_3_models() {
+        let body = Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "contents": [],
+                "generationConfig": {"thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": true}}
+            }))
+            .unwrap(),
+        );
+        let stripped = strip_unsupported_gemini_thinking_level(
+            "/v1beta/models/gemini-2.5-flash:streamGenerateContent",
+            &body,
+        );
+        let json: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+        assert_eq!(
+            json["generationConfig"]["thinkingConfig"],
+            serde_json::json!({"includeThoughts": true})
+        );
+
+        for path in [
+            "/v1beta/models/gemini-3-flash-preview:generateContent",
+            "/v1beta/models/custom-model:generateContent",
+        ] {
+            assert_eq!(
+                strip_unsupported_gemini_thinking_level(path, &body),
+                body,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn gemini_thinking_level_is_stripped_from_code_assist_wrapper() {
+        let body = Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "model": "gemini-2.5-flash-lite",
+                "request": {"generationConfig": {"thinkingConfig": {"thinkingLevel": "MINIMAL"}}}
+            }))
+            .unwrap(),
+        );
+        let stripped =
+            strip_unsupported_gemini_thinking_level("/v1internal:generateContent", &body);
+        let json: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+        assert_eq!(
+            json["request"]["generationConfig"]["thinkingConfig"],
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn gemini_thinking_level_strip_keeps_unparseable_or_unchanged_bodies() {
+        let path = "/v1beta/models/gemini-2.5-flash:generateContent";
+        let invalid = Bytes::from_static(b"{not json");
+        assert_eq!(
+            strip_unsupported_gemini_thinking_level(path, &invalid),
+            invalid
+        );
+        let no_thinking = Bytes::from_static(br#"{ "contents": [] }"#);
+        assert_eq!(
+            strip_unsupported_gemini_thinking_level(path, &no_thinking),
+            no_thinking
+        );
     }
 
     #[test]

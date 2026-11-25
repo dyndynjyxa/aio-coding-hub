@@ -27,7 +27,7 @@ fn subdir_score(source_subdir: &str) -> i32 {
     if subdir.starts_with(".codex/skills/") {
         score += 100;
     }
-    if subdir.starts_with(".gemini/skills/") {
+    if subdir.starts_with(".agents/skills/") || subdir.starts_with(".gemini/skills/") {
         score += 100;
     }
 
@@ -256,4 +256,34 @@ pub fn discover_repo_available(
         &repo.branch,
         refresh,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate(path: &str, installed: bool) -> AvailableSkillSummary {
+        AvailableSkillSummary {
+            name: "review".into(),
+            description: String::new(),
+            source_git_url: String::new(),
+            source_branch: String::new(),
+            source_subdir: path.into(),
+            installed,
+        }
+    }
+
+    #[test]
+    fn antigravity_project_skill_beats_generic_copy_but_keeps_installed_source() {
+        let agy = candidate(".agents/skills/review", false);
+        assert!(prefer_candidate(&candidate("skills/review", false), &agy));
+        assert!(!prefer_candidate(
+            &candidate(".gemini/skills/review", true),
+            &agy
+        ));
+        assert!(!prefer_candidate(
+            &agy,
+            &candidate(".agents/skills-other/review", false)
+        ));
+    }
 }

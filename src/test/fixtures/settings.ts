@@ -14,7 +14,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     gateway_listen_mode: "localhost",
     gateway_custom_listen_address: "",
     wsl_auto_config: false,
-    wsl_target_cli: { claude: true, codex: true, gemini: true },
+    wsl_target_cli: { claude: true, codex: true, gemini: false },
     cli_priority_order: ["claude", "codex", "gemini", "grok", "claude_desktop"],
     wsl_host_address_mode: "auto",
     wsl_custom_host_address: "127.0.0.1",

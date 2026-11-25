@@ -300,6 +300,7 @@ export const cliManagerKeys = {
     ] as const,
   geminiInfo: () => [...cliManagerAllKey, "gemini", "info"] as const,
   geminiConfig: () => [...cliManagerAllKey, "gemini", "config"] as const,
+  geminiModels: () => [...cliManagerAllKey, "gemini", "models"] as const,
   grokInfo: () => [...cliManagerAllKey, "grok", "info"] as const,
   grokConfig: () => [...cliManagerAllKey, "grok", "config"] as const,
 };

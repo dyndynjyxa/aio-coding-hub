@@ -18,6 +18,9 @@ const ENV_KEY_DISABLE_ERROR_REPORTING: &str = "DISABLE_ERROR_REPORTING";
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_CATALOG_TIMEOUT: Duration = Duration::from_secs(20);
+const AGY_MODELS_TIMEOUT: Duration = Duration::from_secs(15);
+/// Antigravity CLI binary; it serves the `gemini` CLI key.
+pub(crate) const AGY_COMMAND: &str = "agy";
 const CMD_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const COMMAND_OUTPUT_STREAM_LIMIT: usize = 16 * 1024;
 const COMMAND_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
@@ -45,6 +48,14 @@ pub struct SimpleCliInfo {
     pub error: Option<String>,
     pub shell: Option<String>,
     pub resolved_via: String,
+}
+
+/// One entry of `agy models`: `id` is accepted by `--model`, `label` is what
+/// `settings.json` `model` must hold (agy ignores an id there).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct GeminiModelOption {
+    pub id: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone)]
@@ -575,6 +586,10 @@ fn scan_executable<R: tauri::Runtime>(
         if let Some(appdata) = std::env::var_os("APPDATA") {
             candidates.push(PathBuf::from(appdata).join("npm"));
         }
+        if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
+            // Antigravity CLI installer default.
+            candidates.push(PathBuf::from(local_appdata).join("agy").join("bin"));
+        }
     }
 
     for dir in candidates {
@@ -912,7 +927,60 @@ pub fn codex_info_get(app: &tauri::AppHandle) -> crate::shared::error::AppResult
 }
 
 pub fn gemini_info_get(app: &tauri::AppHandle) -> crate::shared::error::AppResult<SimpleCliInfo> {
-    simple_cli_info_get(app, "gemini")
+    simple_cli_info_get(app, AGY_COMMAND)
+}
+
+fn parse_agy_models(stdout: &str) -> Vec<GeminiModelOption> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let (id, label) = line.split_once('\t')?;
+            let (id, label) = (id.trim(), label.trim());
+            (!id.is_empty() && !label.is_empty()).then(|| GeminiModelOption {
+                id: id.to_string(),
+                label: label.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Lists the models agy offers in its active mode: the gateway's catalog while
+/// the takeover is on, otherwise the signed-in Google account's. Signed out it
+/// fails, and the UI falls back to free-text input.
+pub fn gemini_models_list(
+    app: &tauri::AppHandle,
+) -> crate::shared::error::AppResult<Vec<GeminiModelOption>> {
+    let exe = match resolve_executable_via_login_shell(AGY_COMMAND) {
+        Ok(Some(path)) => Some(path),
+        Ok(None) | Err(_) => scan_executable(app, AGY_COMMAND)?,
+    };
+    let Some(exe) = exe else {
+        return Err("CLI_NOT_FOUND: Antigravity CLI (agy) is not installed".into());
+    };
+
+    let mut command = Command::new(&exe);
+    command
+        .arg("models")
+        .env("PATH", runtime_path_for_executable(&exe)?);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = command_output_with_timeout(
+        command,
+        AGY_MODELS_TIMEOUT,
+        format!("{} models", exe.display()),
+    )?;
+    let stdout = limited_output_to_string(&output.stdout, "stdout");
+    if !output.status.success() {
+        let stderr = limited_output_to_string(&output.stderr, "stderr");
+        let message = if stderr.is_empty() { stdout } else { stderr };
+        return Err(format!("agy models failed: {message}").into());
+    }
+    Ok(parse_agy_models(&stdout))
 }
 
 pub fn simple_cli_info_get(
@@ -995,6 +1063,31 @@ mod tests {
 
         let names = vec!["codex".to_string()];
         assert_eq!(find_exe_in_dir(dir.path(), &names), Some(path));
+    }
+
+    #[test]
+    fn parse_agy_models_reads_id_label_rows_and_skips_noise() {
+        let stdout = "Fetching available models...\n\
+gemini-4-neon-high\tGemini 4 Neon (High)\n\
+gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\r\n\
+\n\
+broken-row-without-tab\n\
+\t\n";
+
+        assert_eq!(
+            parse_agy_models(stdout),
+            vec![
+                GeminiModelOption {
+                    id: "gemini-4-neon-high".into(),
+                    label: "Gemini 4 Neon (High)".into(),
+                },
+                GeminiModelOption {
+                    id: "gemini-3.8-flash-low".into(),
+                    label: "Gemini 3.8 Flash (Low)".into(),
+                },
+            ]
+        );
+        assert!(parse_agy_models("").is_empty());
     }
 
     #[test]

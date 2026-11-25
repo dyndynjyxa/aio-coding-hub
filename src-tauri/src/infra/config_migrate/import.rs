@@ -602,6 +602,9 @@ INSERT INTO mcp_servers(
                         workspace_cli_key, workspace_name
                     ))
                 })?;
+            if workspace_cli_key == "gemini" && server.transport == "sse" {
+                continue;
+            }
             tx.execute(
                 r#"
 INSERT INTO workspace_mcp_enabled(workspace_id, server_id, created_at, updated_at)

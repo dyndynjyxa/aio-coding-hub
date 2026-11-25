@@ -6,7 +6,7 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 38,
+      schema_version: 39,
       preferred_port: 37123,
       show_home_heatmap: true,
       show_home_usage: true,
@@ -14,7 +14,7 @@ describe("MSW defaults", () => {
       gateway_listen_mode: "localhost",
       gateway_custom_listen_address: "",
       wsl_auto_config: false,
-      wsl_target_cli: { claude: true, codex: true, gemini: true },
+      wsl_target_cli: { claude: true, codex: true, gemini: false },
       cli_priority_order: ["claude", "codex", "gemini", "grok", "claude_desktop"],
       wsl_host_address_mode: "auto",
       wsl_custom_host_address: "127.0.0.1",

@@ -40,7 +40,7 @@ export function CliVersionBadge({
         if (!cancelled) {
           setResult({
             cliKey,
-            npmPackage: "",
+            packageName: "",
             installedVersion,
             latestVersion: null,
             updateAvailable: false,

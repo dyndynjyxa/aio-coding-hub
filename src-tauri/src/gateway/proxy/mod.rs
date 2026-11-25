@@ -16,6 +16,7 @@ mod errors;
 mod failover;
 mod fake_200;
 mod forwarder;
+mod gemini_catalog;
 mod gemini_oauth;
 pub(in crate::gateway) mod handler;
 mod http_util;
@@ -76,7 +77,9 @@ fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
 }
 
 fn should_observe_request(cli_key: &str, method: &Method, forwarded_path: &str) -> bool {
-    if is_codex_model_discovery_request(cli_key, method, forwarded_path) {
+    if is_codex_model_discovery_request(cli_key, method, forwarded_path)
+        || gemini_catalog::is_request(cli_key, method, forwarded_path)
+    {
         return false;
     }
 

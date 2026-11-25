@@ -30,6 +30,7 @@ pub(super) struct PreparedProvider {
     pub(super) upstream_body_bytes: Bytes,
     pub(super) strip_request_content_encoding: bool,
     pub(super) request_body_mutated_before_attempt: bool,
+    pub(super) gemini_catalog_policy: Option<crate::providers::ProviderModelPolicyV1>,
     pub(super) gemini_oauth_response_mode: Option<GeminiOAuthResponseMode>,
     pub(super) use_codex_chatgpt_backend: bool,
     pub(super) codex_chatgpt_account_id: Option<String>,
@@ -116,6 +117,30 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         {
             Some(allow) => allow,
             None => return PreparationOutcome::Skipped,
+        };
+
+    let gemini_catalog_policy =
+        if gemini_catalog::is_request(&input.cli_key, &input.req_method, &input.forwarded_path) {
+            // A malformed policy cannot route generation requests, either.
+            let Some(policy) = provider.model_policy.clone() else {
+                provider_checks::skip_with_reason(
+                    attempts,
+                    provider_id,
+                    &provider_name_base,
+                    &provider_base_url_display,
+                    input.started.elapsed().as_millis(),
+                    SkipReason {
+                        error_category: "config",
+                        error_code: GatewayErrorCode::InternalError.as_str(),
+                        reason: "Gemini model catalog requires a valid provider model policy"
+                            .into(),
+                    },
+                );
+                return PreparationOutcome::Skipped;
+            };
+            Some(policy)
+        } else {
+            None
         };
 
     let is_cx2cc_bridge = provider.is_cx2cc_bridge();
@@ -225,7 +250,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     }
 
     if let Some(adapter) = &oauth_adapter {
-        if adapter.provider_type() == "gemini_oauth" {
+        if adapter.provider_type() == "gemini_oauth" && gemini_catalog_policy.is_none() {
             match provider_checks::prepare_gemini_oauth(
                 input,
                 &effective_credential,
@@ -482,6 +507,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         upstream_body_bytes,
         strip_request_content_encoding,
         request_body_mutated_before_attempt,
+        gemini_catalog_policy,
         gemini_oauth_response_mode,
         use_codex_chatgpt_backend,
         codex_chatgpt_account_id,

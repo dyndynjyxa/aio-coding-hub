@@ -18,6 +18,12 @@ pub(super) struct McpSyncFileEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct LegacyGeminiOwnership {
+    pub(super) existed: bool,
+    pub(super) managed_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct McpSyncManifest {
     pub(super) schema_version: u32,
     pub(super) managed_by: String,
@@ -26,6 +32,8 @@ pub(super) struct McpSyncManifest {
     pub(super) created_at: i64,
     pub(super) updated_at: i64,
     pub(super) file: McpSyncFileEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) pending_legacy_gemini: Option<LegacyGeminiOwnership>,
     pub(super) managed_keys: Vec<String>,
 }
 
@@ -143,7 +151,7 @@ pub(super) fn backup_for_enable<R: tauri::Runtime>(
     let backup_rel = if let Some(bytes) = current {
         let backup_name = backup_file_name(cli_key);
         let backup_path = files_dir.join(backup_name);
-        write_file_atomic(&backup_path, &bytes)?;
+        super::fs::write_config_file(cli_key, &backup_path, &bytes)?;
         Some(backup_name.to_string())
     } else {
         None
@@ -164,5 +172,26 @@ pub(super) fn backup_for_enable<R: tauri::Runtime>(
             backup_rel,
         },
         managed_keys: Vec::new(),
+        pending_legacy_gemini: None,
     })
+}
+
+pub(crate) fn antigravity_owned_keys<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<std::collections::HashSet<String>> {
+    Ok(read_manifest(app, "gemini")?
+        .filter(|m| m.enabled)
+        .map(|m| m.managed_keys.into_iter().collect())
+        .unwrap_or_default())
+}
+
+pub(crate) fn relinquish_antigravity_keys<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    local: &serde_json::Map<String, serde_json::Value>,
+) -> crate::shared::error::AppResult<()> {
+    if let Some(mut m) = read_manifest(app, "gemini")? {
+        m.managed_keys.retain(|key| !local.contains_key(key));
+        write_manifest(app, "gemini", &m)?;
+    }
+    Ok(())
 }

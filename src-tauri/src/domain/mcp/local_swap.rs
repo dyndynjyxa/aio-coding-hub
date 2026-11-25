@@ -30,6 +30,10 @@ fn stash_file_path<R: tauri::Runtime>(
     let dir = stash_root(app, cli_key)?.join(bucket);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
+    // Legacy Gemini CLI stashes may contain its incompatible HTTP/SSE schema.
+    if cli_key == "gemini" {
+        return Ok(dir.join("antigravity-mcpServers.json"));
+    }
     let ext = match cli_key {
         "codex" | "grok" => "toml",
         _ => "json",
@@ -88,12 +92,16 @@ fn json_remove_local_servers(
 }
 
 fn json_write_stash(
+    cli_key: &str,
     path: &Path,
     map: &serde_json::Map<String, Value>,
 ) -> crate::shared::error::AppResult<()> {
     let bytes = serde_json::to_vec_pretty(&Value::Object(map.clone()))
         .map_err(|e| format!("failed to serialize stash json: {e}"))?;
     ensure_stash_bytes_len(&bytes)?;
+    if cli_key == "gemini" {
+        return crate::shared::fs::write_private_file_atomic(path, &bytes);
+    }
     std::fs::write(path, bytes)
         .map_err(|e| format!("failed to write {}: {e}", path.display()).into())
 }
@@ -270,15 +278,31 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
                     }
                 }
             }
-            let mut root = json_root_from_bytes(current_bytes);
+            let mut root = if cli_key == "gemini" {
+                mcp_sync::parse_antigravity_mcp_root(current_bytes.as_deref())?
+            } else {
+                json_root_from_bytes(current_bytes)
+            };
+            // Only the manifest establishes ownership. A conflicting external
+            // name may still be desired in the outgoing workspace's DB rows.
+            let actual;
+            let managed_server_keys = if cli_key == "gemini" {
+                actual = mcp_sync::antigravity_owned_keys(app)?;
+                &actual
+            } else {
+                managed_server_keys
+            };
             let local_current = {
                 let servers_obj = json_mcp_servers_obj_mut(&mut root);
                 json_collect_local_servers(servers_obj, managed_server_keys)
             };
-            json_write_stash(&from_path, &local_current)?;
+            json_write_stash(cli_key, &from_path, &local_current)?;
 
             let local_to = json_read_stash(&to_path);
 
+            if cli_key == "gemini" && local_to.keys().any(|key| managed_server_keys.contains(key)) {
+                mcp_sync::relinquish_antigravity_keys(app, &local_to)?;
+            }
             let servers_obj = json_mcp_servers_obj_mut(&mut root);
             json_remove_local_servers(servers_obj, managed_server_keys);
             for (k, v) in local_to {
