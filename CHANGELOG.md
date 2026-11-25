@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.60.27](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.26...aio-coding-hub-v0.60.27) (2026-11-25)
+
+
+### Features
+
+* **gemini:** switch Gemini integration to Antigravity CLI ([cb5e491](https://github.com/dyndynjyxa/aio-coding-hub/commit/cb5e491d0cbc404d269e3024029fe8db67f2d10b))
+
+
+### Bug Fixes
+
+* **deps:** bump crates flagged by cargo audit ([01855be](https://github.com/dyndynjyxa/aio-coding-hub/commit/01855be5982ace328c2af8ca76e29b94deb0bca6))
+* **gateway:** skip logging Gemini model list fallback ([b03a596](https://github.com/dyndynjyxa/aio-coding-hub/commit/b03a596596f09b9f0781a2704f84b195ee569ecc))
+* **oauth:** allow included Codex usage after the credit spend cap ([#398](https://github.com/dyndynjyxa/aio-coding-hub/issues/398)) ([236b07c](https://github.com/dyndynjyxa/aio-coding-hub/commit/236b07c80e620fe5ec99cd5e0d76ce5c7786b021))
+
 ## [0.60.26](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.25...aio-coding-hub-v0.60.26) (2026-11-06)
 
 
