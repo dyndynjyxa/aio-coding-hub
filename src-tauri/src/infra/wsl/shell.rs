@@ -31,7 +31,7 @@ pub(super) fn decode_utf16_le(mut bytes: &[u8]) -> String {
 
     let len = bytes.len() - (bytes.len() % 2);
     let mut u16s = Vec::with_capacity(len / 2);
-    for chunk in bytes[..len].chunks_exact(2) {
+    for chunk in bytes[..len].as_chunks::<2>().0 {
         u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
 

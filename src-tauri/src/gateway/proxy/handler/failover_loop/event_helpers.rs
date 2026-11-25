@@ -38,7 +38,6 @@ pub(super) async fn emit_attempt_event_and_log<R: tauri::Runtime>(
         retry_index: _,
         attempt_started_ms,
         attempt_started,
-        circuit_before: _,
         ..
     } = attempt_ctx;
 

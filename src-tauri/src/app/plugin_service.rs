@@ -4774,7 +4774,9 @@ INSERT INTO plugins (
     fn hex_to_bytes(value: &str) -> Vec<u8> {
         value
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 let text = std::str::from_utf8(pair).unwrap();
                 u8::from_str_radix(text, 16).unwrap()

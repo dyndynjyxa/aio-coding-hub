@@ -443,6 +443,8 @@ async fn stub_http(
     ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
 }
 
+// Tests match on tungstenite's own error variants (e.g. Error::Http for 426).
+#[allow(clippy::result_large_err)]
 async fn connect(
     server: &Server,
     session: &str,
@@ -450,6 +452,7 @@ async fn connect(
     connect_with_user_agent(server, session, Some("codex_exec/0.156.0 (router-test)")).await
 }
 
+#[allow(clippy::result_large_err)]
 async fn connect_with_user_agent(
     server: &Server,
     session: &str,

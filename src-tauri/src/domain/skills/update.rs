@@ -72,10 +72,7 @@ fn get_latest_commit_for_skill(
             // Try main first, then master. If both fail, return error.
             match github_get_branch_commit(&owner, &repo, "main") {
                 Ok(commit) => return Ok(commit),
-                Err(_) => match github_get_branch_commit(&owner, &repo, "master") {
-                    Ok(commit) => return Ok(commit),
-                    Err(e) => return Err(e),
-                },
+                Err(_) => return github_get_branch_commit(&owner, &repo, "master"),
             }
         } else {
             normalized_branch.clone()

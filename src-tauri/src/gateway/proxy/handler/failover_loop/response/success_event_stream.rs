@@ -59,7 +59,6 @@ where
         circuit_before,
         gemini_oauth_response_mode,
         cx2cc_active,
-        anthropic_stream_requested: _,
         ..
     } = attempt_ctx;
     let selection_method = dc::selection_method(provider_index, retry_index, session_reuse);

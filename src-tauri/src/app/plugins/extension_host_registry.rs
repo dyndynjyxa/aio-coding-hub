@@ -702,8 +702,10 @@ impl ExtensionHostRuntimeState {
         app: tauri::AppHandle<R>,
         db_state: &DbInitState,
     ) -> AppResult<Arc<ExtensionHostInstanceRegistry>> {
-        if let Some(registry) = { self.registry.lock().await.clone() } {
-            return Ok(registry.clone());
+        // Release the lock before the slow initialization below.
+        let registry = self.registry.lock().await.clone();
+        if let Some(registry) = registry {
+            return Ok(registry);
         }
 
         let db = ensure_db_ready(app, db_state).await?;

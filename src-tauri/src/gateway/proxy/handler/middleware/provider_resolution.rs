@@ -180,7 +180,7 @@ impl ProviderResolutionMiddleware {
                     EarlyErrorKind::ModelPolicyInvalid,
                     format!(
                         "all candidate providers have invalid model policies for cli_key={}",
-                        &ctx.cli_key
+                        ctx.cli_key
                     ),
                 )
             } else if no_eligible_after_policy {
@@ -189,7 +189,7 @@ impl ProviderResolutionMiddleware {
                     format!(
                         "no eligible provider for model={} cli_key={}",
                         ctx.requested_model.as_deref().unwrap_or("-"),
-                        &ctx.cli_key
+                        ctx.cli_key
                     ),
                 )
             } else {
