@@ -128,11 +128,17 @@ pub(crate) struct PluginInstallRemoteInput {
 }
 
 fn official_resource_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("failed to resolve official plugin resources: {error}"))?;
-    Ok(official_resource_root_from_resource_dir(&resource_dir))
+    match app.path().resource_dir() {
+        Ok(resource_dir) => Ok(official_resource_root_from_resource_dir(&resource_dir)),
+        // Unbundled macOS test binaries have no ../Resources, so Tauri cannot
+        // resolve a resource dir there (Linux and Windows still return one).
+        #[cfg(test)]
+        Err(_) => Ok(crate::app::plugins::official::official_source_resource_root()),
+        #[cfg(not(test))]
+        Err(error) => Err(format!(
+            "failed to resolve official plugin resources: {error}"
+        )),
+    }
 }
 
 fn official_resource_root_from_resource_dir(resource_dir: &std::path::Path) -> PathBuf {
