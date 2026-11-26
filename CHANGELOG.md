@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.60.28](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.27...aio-coding-hub-v0.60.28) (2026-11-26)
+
+
+### Features
+
+* **gateway:** move relays that drop previous_response_id to HTTP ([61f7059](https://github.com/dyndynjyxa/aio-coding-hub/commit/61f7059d58e39c68c8224a490a4c8d7889d260b2))
+
+
+### Bug Fixes
+
+* **gateway:** accept Responses events up to 64 MiB ([924799a](https://github.com/dyndynjyxa/aio-coding-hub/commit/924799a997641bc3f80831fe3f608e88f6ca51df))
+* **gateway:** keep Codex on Responses WebSocket after a lost upstream socket ([6160607](https://github.com/dyndynjyxa/aio-coding-hub/commit/61606074aab6a08b5bd01acea94b27ed46bc9f3d))
+
 ## [0.60.27](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.26...aio-coding-hub-v0.60.27) (2026-11-25)
 
 
