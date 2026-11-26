@@ -1,5 +1,6 @@
 //! Responses WebSocket upgrades through the gateway's existing HTTP transport.
 
+use futures_util::{SinkExt, StreamExt};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, Response, StatusCode, Url, Version};
 use std::time::Duration;
@@ -7,10 +8,18 @@ use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 pub(crate) const MAX_MESSAGE_BYTES: usize = super::protocol::MAX_MESSAGE_BYTES;
 const MAX_CONNECT_DURATION: Duration = Duration::from_secs(5);
+/// OpenAI ends a Responses WebSocket at 60 minutes; no turn starts on one this old.
+const MAX_REUSE_AGE: Duration = Duration::from_secs(55 * 60);
+/// An idle socket pings this often, which keeps NAT and proxy mappings open, and is
+/// dropped when a whole interval passes without a frame: such a drop is silent.
+const KEEPALIVE: Duration = Duration::from_secs(20);
+/// A peer that stopped reading must not hold the next turn.
+const PING_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(crate) type UpstreamWebSocket = WebSocketStream<reqwest::Upgraded>;
 
@@ -18,6 +27,60 @@ pub(crate) type UpstreamWebSocket = WebSocketStream<reqwest::Upgraded>;
 pub(crate) struct UpstreamConnection {
     pub(crate) socket: UpstreamWebSocket,
     pub(crate) headers: HeaderMap,
+    reuse_until: Instant,
+}
+
+/// A socket kept between turns. Reading it answers pings (tungstenite queues the
+/// pong without blocking), so the upstream keeps it open.
+pub(crate) struct IdleConnection {
+    resume: tokio::sync::oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<Option<UpstreamConnection>>,
+}
+
+impl UpstreamConnection {
+    pub(crate) fn park(self) -> IdleConnection {
+        self.park_with(KEEPALIVE)
+    }
+
+    fn park_with(mut self, keepalive: Duration) -> IdleConnection {
+        let (resume, mut resumed) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut ticks = tokio::time::interval_at(Instant::now() + keepalive, keepalive);
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut answered = true;
+            loop {
+                tokio::select! {
+                    biased;
+                    // Also taken when the idle connection is dropped, which ends the task.
+                    _ = &mut resumed => return Some(self),
+                    message = self.socket.next() => match message {
+                        Some(Ok(Message::Close(_)) | Err(_)) | None => return None,
+                        // Pings are answered by the read itself; frames of the finished
+                        // response say nothing of the next one.
+                        Some(Ok(_)) => answered = true,
+                    },
+                    _ = ticks.tick() => {
+                        if !answered {
+                            return None;
+                        }
+                        answered = false;
+                        let ping = self.socket.send(Message::Ping(Vec::new()));
+                        tokio::time::timeout(PING_WRITE_TIMEOUT, ping).await.ok()?.ok()?;
+                    }
+                }
+            }
+        });
+        IdleConnection { resume, task }
+    }
+}
+
+impl IdleConnection {
+    /// None when the socket closed while idle or is too old for another turn.
+    pub(crate) async fn resume(self) -> Option<UpstreamConnection> {
+        let _ = self.resume.send(());
+        let connection = self.task.await.ok()??;
+        (Instant::now() < connection.reuse_until).then_some(connection)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,7 +153,11 @@ async fn connect_with_client(
             ..WebSocketConfig::default()
         };
         let socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, Some(config)).await;
-        Ok(UpstreamConnection { socket, headers })
+        Ok(UpstreamConnection {
+            socket,
+            headers,
+            reuse_until: Instant::now() + MAX_REUSE_AGE,
+        })
     })
     .await
     .map_err(|_| ConnectError::Timeout)?
@@ -410,6 +477,143 @@ mod tests {
             connection.socket.next().await.unwrap(),
             Err(tokio_tungstenite::tungstenite::Error::Capacity(_))
         ));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn idle_connection_answers_pings_and_resumes_for_the_next_turn() {
+        let ponged = std::sync::Arc::new(tokio::sync::Notify::new());
+        let notify = ponged.clone();
+        let router = Router::new().route(
+            "/responses",
+            get(move |ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(move |mut socket| async move {
+                    use axum::extract::ws::Message as Server;
+                    socket.send(Server::Ping(vec![7])).await.unwrap();
+                    socket
+                        .send(Server::Text("late frame of the last turn".into()))
+                        .await
+                        .unwrap();
+                    assert_eq!(socket.recv().await.unwrap().unwrap(), Server::Pong(vec![7]));
+                    notify.notify_one();
+                    let next = socket.recv().await.unwrap().unwrap();
+                    socket.send(next).await.unwrap();
+                })
+            }),
+        );
+        let (url, server) = serve(router).await;
+        let connection = connect_with_client(&client(), url, HeaderMap::new(), deadline())
+            .await
+            .unwrap();
+        let idle = connection.park();
+        tokio::time::timeout(Duration::from_secs(2), ponged.notified())
+            .await
+            .expect("idle socket answers the upstream ping");
+        let mut connection = idle.resume().await.expect("open socket resumes");
+        connection
+            .socket
+            .send(Message::Text("next turn".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            connection.socket.next().await.unwrap().unwrap(),
+            Message::Text("next turn".into())
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn idle_connection_is_not_resumed_after_close_or_at_its_age_limit() {
+        let router = Router::new().route(
+            "/responses",
+            get(|ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(|mut socket| async move {
+                    if socket.recv().await.is_none() {
+                        return;
+                    }
+                    let _ = socket.close().await;
+                })
+            }),
+        );
+        let (url, server) = serve(router).await;
+        let mut closing = connect_with_client(&client(), url.clone(), HeaderMap::new(), deadline())
+            .await
+            .unwrap();
+        closing
+            .socket
+            .send(Message::Text("close".into()))
+            .await
+            .unwrap();
+        let idle = closing.park();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !idle.task.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("idle socket sees the close");
+        assert!(idle.resume().await.is_none());
+
+        let mut old = connect_with_client(&client(), url, HeaderMap::new(), deadline())
+            .await
+            .unwrap();
+        old.reuse_until = Instant::now();
+        assert!(old.park().resume().await.is_none());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn idle_connection_pings_and_drops_a_peer_that_stops_answering() {
+        let router = Router::new()
+            .route(
+                "/answering",
+                get(|ws: WebSocketUpgrade| async move {
+                    // Reading answers the client's pings.
+                    ws.on_upgrade(|mut socket| async move {
+                        while let Some(Ok(_)) = socket.recv().await {}
+                    })
+                }),
+            )
+            .route(
+                "/silent",
+                get(|ws: WebSocketUpgrade| async move {
+                    ws.on_upgrade(|socket| async move {
+                        let _held = socket;
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    })
+                }),
+            );
+        let (url, server) = serve(router).await;
+        let keepalive = Duration::from_millis(50);
+        let answering = connect_with_client(
+            &client(),
+            url.join("answering").unwrap(),
+            HeaderMap::new(),
+            deadline(),
+        )
+        .await
+        .unwrap()
+        .park_with(keepalive);
+        let silent = connect_with_client(
+            &client(),
+            url.join("silent").unwrap(),
+            HeaderMap::new(),
+            deadline(),
+        )
+        .await
+        .unwrap()
+        .park_with(keepalive);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !silent.task.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a peer that never answers the keepalive is dropped");
+        assert!(silent.resume().await.is_none());
+        tokio::time::sleep(keepalive * 6).await;
+        assert!(!answering.task.is_finished());
+        assert!(answering.resume().await.is_some());
         server.abort();
     }
 

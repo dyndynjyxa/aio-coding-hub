@@ -2,7 +2,7 @@
 
 use super::protocol::{self, TURN_STATE_HEADER};
 use super::state::{Connection, InterruptTarget, RequestState, ReusableSocket, WsProbe};
-use super::upstream::{self, ConnectError};
+use super::upstream::{self, ConnectError, UpstreamWebSocket};
 use crate::gateway::streams::{UpstreamResponse, UpstreamStreamError};
 use crate::shared::mutex_ext::MutexExt;
 use axum::body::Bytes;
@@ -10,6 +10,7 @@ use axum::http::{header, HeaderMap};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -17,7 +18,10 @@ pub(in crate::gateway) enum SendOutcome {
     Response(UpstreamResponse),
     Rejected(UpstreamResponse),
     Transport(&'static str),
-    ContextLost { require_http: bool },
+    ContextLost {
+        require_http: bool,
+        reason: &'static str,
+    },
     Local(&'static str),
     Http(&'static str),
 }
@@ -82,7 +86,10 @@ pub(in crate::gateway) async fn send(
         Ok(Value::Object(object)) => Value::Object(object),
         _ => return SendOutcome::Local("invalid Responses request body"),
     };
-    let previous = payload.get("previous_response_id").and_then(Value::as_str);
+    let previous = payload
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let key = socket_key(
         provider_id,
         &url,
@@ -92,11 +99,17 @@ pub(in crate::gateway) async fn send(
         payload.get("model").and_then(Value::as_str),
         crate::gateway::http_client::generation(),
     );
-    let mut reusable = connection
+    let idle = connection
         .upstream
         .lock_or_recover()
         .take()
         .filter(|cached| cached.key == key);
+    let kept = idle.is_some();
+    let mut reusable = match idle {
+        Some(idle) => idle.resume().await,
+        None => None,
+    };
+    let reused = reusable.is_some();
     let allow_ws = supports_ws
         && request.is_none_or(|request| {
             request.client_ws && {
@@ -104,34 +117,34 @@ pub(in crate::gateway) async fn send(
                 !generation.budget.http_only
                     && !generation.budget.http_provider_ids.contains(&provider_id)
             }
-        })
-        && !connection.runtime.cooling(&key);
+        });
     if previous.is_some() {
         let continuation = connection.continuation.lock_or_recover();
         let warm = connection.prewarm.lock_or_recover();
         let valid = continuation.as_ref().is_some_and(|current| {
             current.provider_id == provider_id
                 && current.upstream_ws
-                && Some(current.response_id.as_str()) == previous
+                && Some(current.response_id.as_str()) == previous.as_deref()
         }) || warm.as_ref().is_some_and(|warm| {
-            warm.provider_id == provider_id && Some(warm.response_id.as_str()) == previous
+            warm.provider_id == provider_id
+                && Some(warm.response_id.as_str()) == previous.as_deref()
         });
         if !valid || !allow_ws || reusable.is_none() {
             return SendOutcome::ContextLost {
-                require_http: !allow_ws
-                    || continuation.as_ref().is_some_and(|current| {
-                        current.provider_id == provider_id
-                            && !current.upstream_ws
-                            && Some(current.response_id.as_str()) == previous
-                    }),
+                // While the socket cools the full resend goes over HTTP; staying on WS
+                // would fail every continuation until the cooldown ends.
+                require_http: !supports_ws || connection.runtime.cooling(&key),
+                reason: if kept && !reused {
+                    "ws_reused_socket_lost"
+                } else {
+                    "previous_response_not_found"
+                },
             };
         }
     }
     if !allow_ws {
         let reason = if !supports_ws {
             "provider_http_only"
-        } else if connection.runtime.cooling(&key) {
-            "ws_cooldown_skip"
         } else {
             "session_http_only"
         };
@@ -159,7 +172,7 @@ pub(in crate::gateway) async fn send(
         let deadline = deadline
             .map(tokio::time::Instant::from_std)
             .map_or(connect_cap, |deadline| deadline.min(connect_cap));
-        let connected = match upstream::connect(url, headers, deadline).await {
+        let connected = match upstream::connect(url.clone(), headers.clone(), deadline).await {
             Ok(connected) => connected,
             Err(ConnectError::Rejected(response)) => {
                 let outcome = classify_rejection(UpstreamResponse::from(*response), deadline).await;
@@ -208,17 +221,52 @@ pub(in crate::gateway) async fn send(
     let send_deadline = deadline
         .map(tokio::time::Instant::from_std)
         .map_or(send_cap, |deadline| deadline.min(send_cap));
-    if !matches!(
+    let sent = matches!(
         tokio::time::timeout_at(
             send_deadline,
             reusable.connection.socket.send(Message::Text(serialized))
         )
         .await,
         Ok(Ok(()))
-    ) {
+    );
+    if !sent && !reused {
         connection.runtime.cool(key);
         return SendOutcome::Transport("ws_send_failed");
     }
+    let prelude = if !reused {
+        Prelude::Ready(VecDeque::new())
+    } else if sent {
+        let socket = &mut reusable.connection.socket;
+        let deadline = deadline.map(tokio::time::Instant::from_std);
+        read_prelude(socket, deadline).await
+    } else {
+        Prelude::Lost
+    };
+    let prelude = match prelude {
+        Prelude::Ready(frames) => frames,
+        // A socket kept between turns can end without fault of the endpoint.
+        Prelude::Lost if previous.is_none() => {
+            drop(reusable);
+            return Box::pin(send(
+                connection,
+                request,
+                provider_id,
+                supports_ws,
+                url,
+                headers,
+                custom_headers,
+                body,
+                deadline,
+            ))
+            .await;
+        }
+        Prelude::Lost => {
+            return SendOutcome::ContextLost {
+                require_http: false,
+                reason: "ws_reused_socket_lost",
+            }
+        }
+    };
     if let Some(request) = request {
         request.generation.lock_or_recover().upstream_ws = true;
     }
@@ -232,6 +280,7 @@ pub(in crate::gateway) async fn send(
         Some(ResponseStream {
             connection,
             reusable,
+            prelude,
             probe,
             controls,
             interruption: None,
@@ -248,9 +297,85 @@ pub(in crate::gateway) async fn send(
     SendOutcome::Response(UpstreamResponse::new_ws(headers, stream))
 }
 
+enum Prelude {
+    /// Frames read ahead of the reply, handed on first.
+    Ready(VecDeque<String>),
+    /// The kept socket ended before it answered.
+    Lost,
+}
+
+/// Frames that may come ahead of a reply and say nothing of it.
+const NEUTRAL_EVENTS: [&str; 6] = [
+    "codex.rate_limits",
+    "codex.response.metadata",
+    "response.metadata",
+    "responsesapi.websocket_timing",
+    "response.interrupt.accepted",
+    "response.interrupt.failed",
+];
+const MAX_PRELUDE_FRAMES: usize = 8;
+
+/// Read a kept socket's first frames before anything is handed on: it may have
+/// ended between turns.
+async fn read_prelude(
+    socket: &mut UpstreamWebSocket,
+    deadline: Option<tokio::time::Instant>,
+) -> Prelude {
+    let mut frames = VecDeque::new();
+    while frames.len() < MAX_PRELUDE_FRAMES {
+        let message = match deadline {
+            Some(deadline) => match tokio::time::timeout_at(deadline, socket.next()).await {
+                Ok(message) => message,
+                // The gate reports the deadline.
+                Err(_) => break,
+            },
+            None => socket.next().await,
+        };
+        let text = match message {
+            Some(Ok(Message::Text(text))) => text,
+            // tungstenite answers pings while reading.
+            Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+            _ => return Prelude::Lost,
+        };
+        let step = serde_json::from_str(&text).map_or(Step::Reply, |event| prelude_step(&event));
+        frames.push_back(text);
+        match step {
+            Step::Neutral => {}
+            Step::Reply => break,
+            Step::Lost => return Prelude::Lost,
+        }
+    }
+    Prelude::Ready(frames)
+}
+
+#[derive(Debug, PartialEq)]
+enum Step {
+    Neutral,
+    Reply,
+    Lost,
+}
+
+fn prelude_step(event: &Value) -> Step {
+    let kind = event
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if NEUTRAL_EVENTS.contains(&kind) {
+        return Step::Neutral;
+    }
+    if kind == "error"
+        && event.pointer("/error/code").and_then(Value::as_str)
+            == Some("websocket_connection_limit_reached")
+    {
+        return Step::Lost;
+    }
+    Step::Reply
+}
+
 struct ResponseStream {
     connection: Arc<Connection>,
     reusable: ReusableSocket,
+    prelude: VecDeque<String>,
     probe: Option<WsProbe>,
     controls: tokio::sync::mpsc::Receiver<String>,
     // The bool records whether the upstream acknowledgement is still pending.
@@ -287,7 +412,7 @@ impl ResponseStream {
             if let Some(probe) = self.probe.take() {
                 probe.succeeded();
             }
-            *self.connection.upstream.lock_or_recover() = Some(self.reusable);
+            *self.connection.upstream.lock_or_recover() = Some(self.reusable.park());
         }
         (Ok(bytes), None)
     }
@@ -295,20 +420,24 @@ impl ResponseStream {
     async fn next(mut self) -> Option<(Result<Bytes, UpstreamStreamError>, Option<Self>)> {
         loop {
             let ack_deadline = self.terminal.unwrap_or_else(tokio::time::Instant::now);
-            let message = tokio::select! {
-                biased;
-                control = self.controls.recv(), if self.interruption.is_none() && (!self.controls.is_closed() || !self.controls.is_empty()) => {
-                    if let Some(response_id) = control {
-                        if let Err(error) = self.interrupt(response_id).await {
-                            return Some((Err(error), None));
+            let message = if let Some(text) = self.prelude.pop_front() {
+                Some(Ok(Message::Text(text)))
+            } else {
+                tokio::select! {
+                    biased;
+                    control = self.controls.recv(), if self.interruption.is_none() && (!self.controls.is_closed() || !self.controls.is_empty()) => {
+                        if let Some(response_id) = control {
+                            if let Err(error) = self.interrupt(response_id).await {
+                                return Some((Err(error), None));
+                            }
                         }
-                    }
-                    continue;
-                },
-                _ = tokio::time::sleep_until(ack_deadline), if self.terminal.is_some() => {
-                    return Some((Err(protocol_error("WebSocket interrupt acknowledgement timed out")), None));
-                },
-                message = self.reusable.connection.socket.next() => message,
+                        continue;
+                    },
+                    _ = tokio::time::sleep_until(ack_deadline), if self.terminal.is_some() => {
+                        return Some((Err(protocol_error("WebSocket interrupt acknowledgement timed out")), None));
+                    },
+                    message = self.reusable.connection.socket.next() => message,
+                }
             };
             match message {
                 Some(Ok(Message::Text(text))) => {
@@ -546,6 +675,24 @@ mod tests {
         .await
         .expect("handshake body probing must retain the attempt deadline");
         assert!(matches!(outcome, SendOutcome::Rejected(_)));
+    }
+
+    #[test]
+    fn prelude_skips_neutral_frames_and_treats_the_connection_limit_as_a_lost_socket() {
+        use serde_json::json;
+        for kind in NEUTRAL_EVENTS {
+            assert_eq!(prelude_step(&json!({"type":kind})), Step::Neutral);
+        }
+        let limit = json!({"type":"error","error":{"code":"websocket_connection_limit_reached"}});
+        assert_eq!(prelude_step(&limit), Step::Lost);
+        for reply in [
+            json!({"type":"response.created","response":{"id":"resp-b"}}),
+            json!({"type":"response.output_text.delta","delta":"x"}),
+            // The gate recovers previous_response_not_found itself.
+            json!({"type":"error","error":{"code":"previous_response_not_found"}}),
+        ] {
+            assert_eq!(prelude_step(&reply), Step::Reply, "{reply}");
+        }
     }
 
     #[test]

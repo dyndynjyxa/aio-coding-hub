@@ -87,7 +87,15 @@ where
                         .and_then(serde_json::Value::as_str)
                         == Some("previous_response_not_found");
                     if context_lost {
-                        return ws_attempt::recover(ctx, input, prepared, false, loop_state).await;
+                        return ws_attempt::recover(
+                            ctx,
+                            input,
+                            prepared,
+                            false,
+                            "previous_response_not_found",
+                            loop_state,
+                        )
+                        .await;
                     }
                     response_fixer::push_special_setting(
                         &input.special_settings,

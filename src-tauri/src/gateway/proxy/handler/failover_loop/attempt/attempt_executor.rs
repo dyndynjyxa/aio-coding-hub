@@ -71,6 +71,7 @@ pub(super) enum AttemptSendOutcome {
     WsTransport(&'static str, AttemptTiming),
     ContextLost {
         require_http: bool,
+        reason: &'static str,
     },
     LocalProtocol(&'static str, AttemptTiming),
     Timeout(AttemptTiming),
@@ -358,8 +359,14 @@ where
             SendOutcome::Transport(reason) => {
                 return AttemptSendOutcome::WsTransport(reason, timing)
             }
-            SendOutcome::ContextLost { require_http } => {
-                return AttemptSendOutcome::ContextLost { require_http }
+            SendOutcome::ContextLost {
+                require_http,
+                reason,
+            } => {
+                return AttemptSendOutcome::ContextLost {
+                    require_http,
+                    reason,
+                }
             }
             SendOutcome::Local(reason) => return AttemptSendOutcome::LocalProtocol(reason, timing),
             SendOutcome::Http(reason) => {

@@ -269,6 +269,10 @@ enum Behavior {
     AllFail,
     DisconnectAfterContent,
     DisconnectIncrementalBeforeOutput,
+    /// Closes its socket on the second create without a reply.
+    DisconnectSecondCreate,
+    /// Closes the socket of the first continuation it gets, after response.created.
+    DisconnectAfterCreated,
     ErrorAfterContent(&'static str),
     JsonComplete,
     JsonIncomplete,
@@ -280,6 +284,7 @@ struct Stub {
     behavior: Behavior,
     calls: Arc<Mutex<Vec<(String, HeaderMap, Value)>>>,
     release: Arc<tokio::sync::Notify>,
+    disconnected: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Stub {
     async fn start(name: &'static str, behavior: Behavior) -> (Self, Server) {
@@ -288,6 +293,7 @@ impl Stub {
             behavior,
             calls: Default::default(),
             release: Default::default(),
+            disconnected: Default::default(),
         };
         let router = Router::new()
             .route("/v1/responses", get(stub_ws).post(stub_http))
@@ -347,10 +353,12 @@ async fn stub_ws(
     }
     upgrade
         .on_upgrade(move |mut socket| async move {
+            let mut creates = 0;
             while let Some(Ok(axum::extract::ws::Message::Text(body))) = socket.recv().await {
                 let body: Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(body["type"], "response.create");
                 assert!(body.get("stream").is_none());
+                creates += 1;
                 if matches!(stub.behavior, Behavior::DisconnectIncrementalBeforeOutput)
                     && body.get("previous_response_id").is_some()
                 {
@@ -360,18 +368,27 @@ async fn stub_ws(
                         .push(("ws".into(), headers.clone(), body));
                     break;
                 }
-                for event in events(stub.name).into_iter().take(
-                    if matches!(
-                        stub.behavior,
-                        Behavior::DisconnectAfterContent
-                            | Behavior::ErrorAfterContent(_)
-                            | Behavior::HoldAfterContent
-                    ) {
-                        2
-                    } else {
-                        4
-                    },
+                if matches!(stub.behavior, Behavior::DisconnectSecondCreate) && creates == 2 {
+                    break;
+                }
+                let output = events(stub.name);
+                let disconnect = matches!(stub.behavior, Behavior::DisconnectAfterCreated)
+                    && body.get("previous_response_id").is_some()
+                    && !stub
+                        .disconnected
+                        .swap(true, std::sync::atomic::Ordering::AcqRel);
+                for event in output.into_iter().take(if disconnect {
+                    1
+                } else if matches!(
+                    stub.behavior,
+                    Behavior::DisconnectAfterContent
+                        | Behavior::ErrorAfterContent(_)
+                        | Behavior::HoldAfterContent
                 ) {
+                    2
+                } else {
+                    4
+                }) {
                     socket
                         .send(axum::extract::ws::Message::Text(event.to_string()))
                         .await
@@ -396,8 +413,12 @@ async fn stub_ws(
                 }
                 if !matches!(
                     stub.behavior,
-                    Behavior::KeepAlive | Behavior::DisconnectIncrementalBeforeOutput
-                ) {
+                    Behavior::KeepAlive
+                        | Behavior::DisconnectIncrementalBeforeOutput
+                        | Behavior::DisconnectSecondCreate
+                        | Behavior::DisconnectAfterCreated
+                ) || disconnect
+                {
                     break;
                 }
             }
@@ -592,6 +613,18 @@ async fn connection_idle_timeout_uses_global_setting_and_zero_disables_it() {
         "zero disables connection idle timeout"
     );
     let _ = sockets[0].close(None).await;
+}
+
+/// The detailed cause; the client-facing reason_code stays the one request logs key on.
+fn full_input_retry_cause(row: &request_logs::RequestLogInsert) -> Value {
+    let settings: Vec<Value> =
+        serde_json::from_str(row.special_settings_json.as_deref().unwrap()).unwrap();
+    let retry = settings
+        .into_iter()
+        .find(|setting| setting["transport_action"] == "full_input_retry")
+        .expect("full_input_retry marker");
+    assert_eq!(retry["reason_code"], "previous_response_not_found");
+    retry["cause"].clone()
 }
 
 async fn terminal_log(
@@ -888,10 +921,11 @@ async fn ws_without_recovery_metadata_cannot_replay_after_context_loss() {
         let (next, next_server) = Stub::start("B", Behavior::Complete).await;
         fixture.provider("A", &upstream.origin(), true);
         fixture.provider("B", &next_server.origin(), false);
-        let (gateway, _logs) = fixture.start().await;
+        let (gateway, mut logs) = fixture.start().await;
         let mut socket = connect(&gateway, "ordinary-context-loss").await.unwrap();
         socket.send(create_message(None)).await.unwrap();
         recv_until(&mut socket, "response.completed").await;
+        assert_eq!(terminal_log(&mut logs).await.status, Some(200));
         if new_connection {
             socket.close(None).await.unwrap();
             socket = connect(&gateway, "ordinary-context-loss").await.unwrap();
@@ -908,6 +942,11 @@ async fn ws_without_recovery_metadata_cannot_replay_after_context_loss() {
             .unwrap();
         let error = recv_until(&mut socket, "error").await;
         assert_eq!(error["type"], "error");
+        let failure = terminal_log(&mut logs).await;
+        if !new_connection {
+            // The stub closes its socket after each reply, so the kept one was lost.
+            assert_eq!(full_input_retry_cause(&failure), "ws_reused_socket_lost");
+        }
         assert_eq!(
             first.transports(),
             ["ws"],
@@ -938,7 +977,7 @@ async fn http_fallback_moves_only_the_affected_session_to_continuous_http() {
     for (supports_ws, behavior) in [
         (false, Behavior::Complete),
         (true, Behavior::UnsupportedWs),
-        (true, Behavior::DisconnectIncrementalBeforeOutput),
+        (true, Behavior::DisconnectAfterCreated),
     ] {
         for metadata in [false, true] {
             let fixture = Fixture::new(true).await;
@@ -992,18 +1031,18 @@ async fn http_fallback_moves_only_the_affected_session_to_continuous_http() {
             let failure = terminal_log(&mut logs).await;
             assert_eq!(failure.status, Some(400));
             let attempts: Vec<Value> = serde_json::from_str(&failure.attempts_json).unwrap();
-            if matches!(behavior, Behavior::DisconnectIncrementalBeforeOutput) {
+            if matches!(behavior, Behavior::DisconnectAfterCreated) {
+                // A stream that breaks mid-continuation is a fault; its resend goes over HTTP.
                 assert!(attempts
                     .iter()
                     .any(|attempt| attempt["reason"] == "ws_stream_failed_before_output"));
-                assert_eq!(stub.transports(), ["ws", "ws"]);
             } else {
                 assert!(
                     attempts.is_empty(),
                     "local context rejection must not call upstream"
                 );
-                assert_eq!(stub.transports(), upstream_before);
             }
+            assert_eq!(stub.transports(), upstream_before);
             drop(socket);
             match connect(&gateway, session).await {
                 Err(Error::Http(response)) => {
@@ -1064,6 +1103,135 @@ async fn http_fallback_moves_only_the_affected_session_to_continuous_http() {
             stub.assert_auth();
         }
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lost_reused_socket_asks_for_a_full_resend_and_keeps_the_session_on_ws() {
+    for metadata in [false, true] {
+        let fixture = Fixture::new(true).await;
+        let (stub, upstream) = Stub::start("A", Behavior::DisconnectIncrementalBeforeOutput).await;
+        fixture.provider("A", &upstream.origin(), true);
+        let (gateway, mut logs) = fixture.start().await;
+        let session = "lost-reused-socket";
+        let Message::Text(create) = create_message(metadata.then_some(session)) else {
+            unreachable!()
+        };
+        let mut body: Value = serde_json::from_str(&create).unwrap();
+        body["input"][0]["type"] = json!("message");
+        let mut history = body["input"].as_array().unwrap().clone();
+        let mut socket = connect(&gateway, session).await.unwrap();
+        socket.send(Message::Text(body.to_string())).await.unwrap();
+        if metadata {
+            let nonce = recv_until(&mut socket, "response.metadata").await["headers"]
+                [protocol::TURN_STATE_HEADER]
+                .clone();
+            body["client_metadata"][protocol::TURN_STATE_HEADER] = nonce;
+        }
+        let completed = recv_until(&mut socket, "response.completed").await;
+        history.extend(completed["response"]["output"].as_array().unwrap().clone());
+        assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+
+        let next = json!({"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]});
+        history.push(next.clone());
+        body["input"] = json!([next]);
+        body["previous_response_id"] = json!("resp-A");
+        socket.send(Message::Text(body.to_string())).await.unwrap();
+        let error = recv_until(&mut socket, "error").await;
+        assert_eq!(error["error"]["code"], "previous_response_not_found");
+        let failure = terminal_log(&mut logs).await;
+        assert_eq!(full_input_retry_cause(&failure), "ws_reused_socket_lost");
+        assert_eq!(stub.transports(), ["ws", "ws"]);
+        drop(socket);
+
+        // Codex resends the whole conversation; a lost socket is no reason to leave WS.
+        let mut socket = connect(&gateway, session)
+            .await
+            .expect("a lost socket must not move the session to HTTP");
+        body["input"] = json!(history);
+        body.as_object_mut().unwrap().remove("previous_response_id");
+        socket.send(Message::Text(body.to_string())).await.unwrap();
+        recv_until(&mut socket, "response.completed").await;
+        let row = terminal_log(&mut logs).await;
+        assert_eq!(row.status, Some(200));
+        if metadata {
+            assert!(row
+                .special_settings_json
+                .unwrap_or_default()
+                .contains("recovery_from_trace_id"));
+        }
+        assert_eq!(stub.transports(), ["ws", "ws", "ws"]);
+        let _ = socket.close(None).await;
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fresh_turn_on_a_lost_reused_socket_reconnects_without_cooling_ws() {
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::DisconnectSecondCreate).await;
+    fixture.provider("A", &upstream.origin(), true);
+    let (gateway, mut logs) = fixture.start().await;
+    let mut socket = connect_with_user_agent(&gateway, "lost-socket-fresh", None)
+        .await
+        .unwrap();
+    // Each kept socket closes on its second create; every turn still completes on WS.
+    for _ in 0..3 {
+        socket.send(create_message(None)).await.unwrap();
+        let completed = recv_until(&mut socket, "response.completed").await;
+        assert_eq!(completed["response"]["id"], "resp-A");
+        assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+    }
+    assert_eq!(stub.transports(), ["ws", "ws", "ws"]);
+    socket.close(None).await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cooling_keeps_open_sockets_and_moves_sessions_that_lose_ws_context_to_http() {
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::DisconnectAfterCreated).await;
+    fixture.provider("A", &upstream.origin(), true);
+    let (gateway, mut logs) = fixture.start().await;
+    let continuation = Message::Text(
+        json!({
+            "type":"response.create", "model":"gpt-test", "previous_response_id":"resp-A",
+            "input":[{"role":"user","content":"continue"}]
+        })
+        .to_string(),
+    );
+    let mut broken = connect(&gateway, "cooling-broken").await.unwrap();
+    let mut open = connect(&gateway, "cooling-open").await.unwrap();
+    for socket in [&mut broken, &mut open] {
+        socket.send(create_message(None)).await.unwrap();
+        recv_until(socket, "response.completed").await;
+        assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+    }
+    // The first continuation breaks after response.created, which cools the socket key.
+    broken.send(continuation.clone()).await.unwrap();
+    let error = recv_until(&mut broken, "error").await;
+    assert_eq!(error["error"]["code"], "previous_response_not_found");
+    terminal_log(&mut logs).await;
+    // Another session's open socket still serves its continuation.
+    open.send(continuation.clone()).await.unwrap();
+    recv_until(&mut open, "response.completed").await;
+    assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+    // A session that starts while the key cools is served over HTTP, so its
+    // continuation cannot stay on WS.
+    let mut fresh = connect(&gateway, "cooling-fresh").await.unwrap();
+    fresh.send(create_message(None)).await.unwrap();
+    recv_until(&mut fresh, "response.completed").await;
+    assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+    fresh.send(continuation).await.unwrap();
+    let error = recv_until(&mut fresh, "error").await;
+    assert_eq!(error["error"]["code"], "previous_response_not_found");
+    for session in ["cooling-broken", "cooling-fresh"] {
+        match connect(&gateway, session).await {
+            Err(Error::Http(response)) => {
+                assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED)
+            }
+            _ => panic!("{session} must move to HTTP while the socket cools"),
+        }
+    }
+    assert_eq!(stub.transports(), ["ws", "ws", "http"]);
+    let _ = open.close(None).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1875,11 +2043,13 @@ async fn run_real_codex_cli_ws_failure(failure: CliRecoveryFailure) {
         *requests.lock().unwrap(),
         [
             ("GET".into(), 101),
+            // A lost socket keeps the CLI on WS for its full resend.
+            ("GET".into(), 101),
+            // The upstream then refuses the socket, which moves the CLI to HTTP.
             ("GET".into(), 426),
             ("POST".into(), 200),
-            ("POST".into(), 200),
         ],
-        "AIO must move the real CLI to HTTP before the second tool"
+        "AIO must move the real CLI to HTTP only once the upstream refuses WS"
     );
     let calls = stub.calls.lock().unwrap();
     let generations: Vec<_> = calls
@@ -1953,7 +2123,7 @@ async fn run_real_codex_cli_ws_failure(failure: CliRecoveryFailure) {
         rows.iter()
             .map(|row| row.status.unwrap())
             .collect::<Vec<_>>(),
-        [200, 400, 200, 200]
+        [200, 400, 200, 400, 200]
     );
     let owner = generations[0]
         .1
@@ -1971,7 +2141,7 @@ async fn run_real_codex_cli_ws_failure(failure: CliRecoveryFailure) {
         );
     }
     println!(
-        "{} → AIO 426 → two HTTP tool rounds: passed; each tool executed once; recovery owner={}",
+        "{} → full resend on WS → AIO 426 → HTTP tool round: passed; each tool executed once; recovery owner={}",
         String::from_utf8_lossy(&version.stdout).trim(),
         owner.is_some()
     );

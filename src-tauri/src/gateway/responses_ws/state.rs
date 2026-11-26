@@ -1,7 +1,7 @@
 //! Connection ownership and bounded, single-use continuation recovery metadata.
 
 use super::protocol::{HistoryDigest, Owner, TURN_STATE_HEADER};
-use super::upstream::UpstreamConnection;
+use super::upstream::{IdleConnection, UpstreamConnection};
 use crate::gateway::proxy::GatewayFailure;
 use crate::shared::mutex_ext::MutexExt;
 use axum::http::HeaderMap;
@@ -781,7 +781,7 @@ pub(in crate::gateway) struct Connection {
     _buffers: OwnedSemaphorePermit,
     pub(in crate::gateway) epoch: u64,
     pub(in crate::gateway) continuation: Mutex<Option<Continuation>>,
-    pub(in crate::gateway) upstream: Mutex<Option<ReusableSocket>>,
+    pub(in crate::gateway) upstream: Mutex<Option<IdleSocket>>,
     pub(in crate::gateway) prewarm: Mutex<Option<Prewarm>>,
     pub(super) interrupt: Mutex<Option<InterruptTarget>>,
     // Ingress clears this only after receiving the acknowledgement, even after a terminal.
@@ -804,6 +804,36 @@ pub(in crate::gateway) struct ReusableSocket {
     pub(in crate::gateway) provider_id: i64,
     pub(in crate::gateway) connection: UpstreamConnection,
     pub(in crate::gateway) turn_state: Option<String>,
+}
+
+impl ReusableSocket {
+    pub(in crate::gateway) fn park(self) -> IdleSocket {
+        IdleSocket {
+            key: self.key,
+            provider_id: self.provider_id,
+            turn_state: self.turn_state,
+            connection: self.connection.park(),
+        }
+    }
+}
+
+/// A connection's upstream socket between its turns.
+pub(in crate::gateway) struct IdleSocket {
+    pub(in crate::gateway) key: String,
+    pub(in crate::gateway) provider_id: i64,
+    turn_state: Option<String>,
+    connection: IdleConnection,
+}
+
+impl IdleSocket {
+    pub(in crate::gateway) async fn resume(self) -> Option<ReusableSocket> {
+        Some(ReusableSocket {
+            key: self.key,
+            provider_id: self.provider_id,
+            turn_state: self.turn_state,
+            connection: self.connection.resume().await?,
+        })
+    }
 }
 
 #[derive(Clone)]

@@ -18,13 +18,24 @@ pub(super) fn marker<R: tauri::Runtime>(
 ) {
     response_fixer::push_special_setting(
         &input.special_settings,
-        serde_json::json!({
-            "type":"codex_responses_transport", "scope":"attempt", "providerId":provider,
-            "client_transport": if input.ws_request.as_ref().is_some_and(|r| !r.client_ws) { "http" } else { "responses_ws" },
-            "upstream_transport":transport, "transport_action":action, "failure_class":failure,
-            "reason_code":reason, "output_committed":false,
-        }),
+        setting(input, provider, transport, action, failure, reason),
     );
+}
+
+fn setting<R: tauri::Runtime>(
+    input: &RequestContext<R>,
+    provider: i64,
+    transport: &str,
+    action: &str,
+    failure: Option<&str>,
+    reason: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type":"codex_responses_transport", "scope":"attempt", "providerId":provider,
+        "client_transport": if input.ws_request.as_ref().is_some_and(|r| !r.client_ws) { "http" } else { "responses_ws" },
+        "upstream_transport":transport, "transport_action":action, "failure_class":failure,
+        "reason_code":reason, "output_committed":false,
+    })
 }
 
 pub(super) async fn transport_failure<R: tauri::Runtime>(
@@ -91,7 +102,7 @@ pub(super) async fn transport_failure<R: tauri::Runtime>(
         generation.previous.is_some()
     };
     if previous {
-        recover(ctx, input, prepared, true, loop_state).await
+        recover(ctx, input, prepared, true, reason, loop_state).await
     } else {
         LoopControl::RetryTransport
     }
@@ -102,6 +113,7 @@ pub(super) async fn recover<R: tauri::Runtime>(
     input: &RequestContext<R>,
     prepared: &PreparedProvider,
     require_http: bool,
+    cause: &str,
     loop_state: &mut LoopState<'_, R>,
 ) -> LoopControl {
     let Some(request) = &input.ws_request else {
@@ -135,7 +147,8 @@ pub(super) async fn recover<R: tauri::Runtime>(
                 request.connection.runtime.force_http(session);
             }
         }
-        marker(
+        // reason_code is the client's error code, which request logs key on.
+        let mut setting = setting(
             input,
             prepared.provider_id,
             "responses_ws",
@@ -143,6 +156,8 @@ pub(super) async fn recover<R: tauri::Runtime>(
             Some("context"),
             Some("previous_response_not_found"),
         );
+        setting["cause"] = cause.into();
+        response_fixer::push_special_setting(&input.special_settings, setting);
         finish_error(
             ctx,
             input,
