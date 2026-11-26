@@ -4,7 +4,9 @@ use axum::body::Bytes;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub(in crate::gateway) const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+/// tungstenite's default, as Codex reads OpenAI's events: image results and long tool
+/// calls exceed a few MiB.
+pub(in crate::gateway) const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 pub(in crate::gateway) const MAX_PREFIX_BYTES: usize = 1024 * 1024;
 pub(in crate::gateway) const MAX_PREFIX_EVENTS: usize = 256;
 pub(in crate::gateway) const TURN_STATE_HEADER: &str = "x-codex-turn-state";

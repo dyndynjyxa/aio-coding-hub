@@ -12,6 +12,8 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 pub(crate) const MAX_MESSAGE_BYTES: usize = super::protocol::MAX_MESSAGE_BYTES;
+/// tungstenite's default, as Codex reads OpenAI's frames.
+const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CONNECT_DURATION: Duration = Duration::from_secs(5);
 /// OpenAI ends a Responses WebSocket at 60 minutes; no turn starts on one this old.
 const MAX_REUSE_AGE: Duration = Duration::from_secs(55 * 60);
@@ -149,7 +151,7 @@ async fn connect_with_client(
         let upgraded = response.upgrade().await.map_err(transport_error)?;
         let config = WebSocketConfig {
             max_message_size: Some(MAX_MESSAGE_BYTES),
-            max_frame_size: Some(MAX_MESSAGE_BYTES),
+            max_frame_size: Some(MAX_FRAME_BYTES),
             ..WebSocketConfig::default()
         };
         let socket = WebSocketStream::from_raw_socket(upgraded, Role::Client, Some(config)).await;
@@ -355,7 +357,7 @@ mod tests {
         );
         assert_eq!(
             connection.socket.get_config().max_frame_size,
-            Some(MAX_MESSAGE_BYTES)
+            Some(MAX_FRAME_BYTES)
         );
         connection
             .socket
@@ -463,7 +465,7 @@ mod tests {
                 ws.on_upgrade(|mut socket| async move {
                     let _ = socket
                         .send(axum::extract::ws::Message::Text(
-                            "x".repeat(MAX_MESSAGE_BYTES + 1),
+                            "x".repeat(MAX_FRAME_BYTES + 1),
                         ))
                         .await;
                 })

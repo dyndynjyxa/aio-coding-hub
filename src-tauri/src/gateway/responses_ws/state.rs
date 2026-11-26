@@ -22,8 +22,9 @@ const WS_COOLDOWN: Duration = Duration::from_secs(60);
 /// As magpie: a relay that answers a continuation as a whole conversation keeps doing so.
 const WS_SHUN: Duration = Duration::from_secs(24 * 60 * 60);
 pub(in crate::gateway) const MAX_CONNECTIONS: usize = 20;
-// shortcut: fixed reservations are not measured heap usage; measure peaks before increasing capacity again.
-const RAW_BUFFER_RESERVATION: u32 = 128 * 1024 * 1024;
+// shortcut: a fixed reservation, not a cap. A turn peaked near 5.6x its largest event
+// (64 MiB) in a debug build; lower MAX_CONNECTIONS if 20 such turns at once matter.
+const RAW_BUFFER_RESERVATION: u32 = 384 * 1024 * 1024;
 const RAW_BUFFER_BUDGET: usize = MAX_CONNECTIONS * RAW_BUFFER_RESERVATION as usize;
 
 pub(in crate::gateway) struct Runtime {

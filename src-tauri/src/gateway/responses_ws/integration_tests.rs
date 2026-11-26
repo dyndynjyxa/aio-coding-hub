@@ -275,6 +275,7 @@ enum Behavior {
     DisconnectAfterCreated,
     /// Answers a continuation without naming its previous response, as a relay that drops it.
     IgnorePreviousResponse,
+    LargeOutput,
     ErrorAfterContent(&'static str),
     JsonComplete,
     JsonIncomplete,
@@ -334,6 +335,20 @@ fn events(name: &str) -> Vec<Value> {
     ]
 }
 
+/// Larger than the former 4 MiB event limit, as image results and long tool calls are.
+const LARGE_TEXT_BYTES: usize = 5 * 1024 * 1024;
+
+fn stub_events(name: &str, behavior: Behavior) -> Vec<Value> {
+    let mut output = events(name);
+    if matches!(behavior, Behavior::LargeOutput) {
+        let text = json!("x".repeat(LARGE_TEXT_BYTES));
+        output[1]["delta"] = text.clone();
+        output[2]["item"]["content"][0]["text"] = text.clone();
+        output[3]["response"]["output"][0]["content"][0]["text"] = text;
+    }
+    output
+}
+
 /// OpenAI answers a continuation with response.created naming the response it continues.
 fn answer(mut output: Vec<Value>, body: &Value, behavior: Behavior) -> Vec<Value> {
     let Some(previous) = body
@@ -389,7 +404,7 @@ async fn stub_ws(
                 if matches!(stub.behavior, Behavior::DisconnectSecondCreate) && creates == 2 {
                     break;
                 }
-                let output = answer(events(stub.name), &body, stub.behavior);
+                let output = answer(stub_events(stub.name, stub.behavior), &body, stub.behavior);
                 let disconnect = matches!(stub.behavior, Behavior::DisconnectAfterCreated)
                     && body.get("previous_response_id").is_some()
                     && !stub
@@ -476,7 +491,7 @@ async fn stub_http(
         }
         return Json(response).into_response();
     }
-    let body: Vec<u8> = events(stub.name)
+    let body: Vec<u8> = stub_events(stub.name, stub.behavior)
         .iter()
         .flat_map(|event| protocol::sse_bytes(event).to_vec())
         .collect();
@@ -1251,6 +1266,25 @@ async fn cooling_keeps_open_sockets_and_moves_sessions_that_lose_ws_context_to_h
     }
     assert_eq!(stub.transports(), ["ws", "ws", "http"]);
     let _ = open.close(None).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn events_larger_than_four_mib_pass_on_ws_and_http() {
+    for supports_ws in [true, false] {
+        let fixture = Fixture::new(true).await;
+        let (stub, upstream) = Stub::start("A", Behavior::LargeOutput).await;
+        fixture.provider("A", &upstream.origin(), supports_ws);
+        let (gateway, mut logs) = fixture.start().await;
+        let observed = generate(&gateway, "large-output").await;
+        assert_completed(&observed, "A");
+        let delta = observed
+            .iter()
+            .find(|event| event["type"] == "response.output_text.delta")
+            .unwrap();
+        assert_eq!(delta["delta"].as_str().unwrap().len(), LARGE_TEXT_BYTES);
+        assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+        assert_eq!(stub.transports(), [if supports_ws { "ws" } else { "http" }]);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
