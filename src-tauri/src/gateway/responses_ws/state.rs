@@ -19,6 +19,8 @@ const MAX_RECOVERIES: usize = 128;
 // shortcut: retain 128 prior windows per turn; revisit if real turns exceed this compaction count.
 const MAX_PREVIOUS_CONTEXT_WINDOWS: usize = 128;
 const WS_COOLDOWN: Duration = Duration::from_secs(60);
+/// As magpie: a relay that answers a continuation as a whole conversation keeps doing so.
+const WS_SHUN: Duration = Duration::from_secs(24 * 60 * 60);
 pub(in crate::gateway) const MAX_CONNECTIONS: usize = 20;
 // shortcut: fixed reservations are not measured heap usage; measure peaks before increasing capacity again.
 const RAW_BUFFER_RESERVATION: u32 = 128 * 1024 * 1024;
@@ -140,6 +142,15 @@ impl Runtime {
     }
 
     pub(in crate::gateway) fn cool(&self, key: String) {
+        self.cool_for(key, WS_COOLDOWN);
+    }
+
+    /// The endpoint ignores previous_response_id; a settings change or restart clears it.
+    pub(in crate::gateway) fn shun(&self, key: String) {
+        self.cool_for(key, WS_SHUN);
+    }
+
+    fn cool_for(&self, key: String, duration: Duration) {
         let now = Instant::now();
         let mut entries = self.cooldowns.lock_or_recover();
         if !entries.contains_key(&key) && entries.len() >= MAX_RECOVERIES {
@@ -156,7 +167,7 @@ impl Runtime {
             entries.insert(
                 key,
                 WsCooldown {
-                    until: now + WS_COOLDOWN,
+                    until: now + duration,
                     probing: false,
                 },
             );
@@ -2036,6 +2047,18 @@ mod tests {
         probe.succeeded();
         assert!(runtime.cooling("endpoint"));
         assert!(runtime.try_ws_probe("endpoint").is_err());
+    }
+
+    #[test]
+    fn shunned_socket_cools_past_a_passing_fault_until_settings_reset() {
+        let runtime = Arc::new(Runtime::new(true));
+        runtime.shun("relay".into());
+        assert!(runtime.try_ws_probe("relay").is_err());
+        let until = runtime.cooldowns.lock_or_recover()["relay"].until;
+        assert!(until > Instant::now() + WS_COOLDOWN * 60);
+        runtime.invalidate();
+        assert!(!runtime.cooling("relay"));
+        assert!(runtime.try_ws_probe("relay").unwrap().is_none());
     }
 
     #[test]

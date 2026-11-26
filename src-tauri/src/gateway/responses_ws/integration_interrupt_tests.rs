@@ -29,7 +29,7 @@ async fn interrupt_ws(State(stub): State<InterruptStub>, upgrade: WebSocketUpgra
                 frames.len() == 1
             };
             assert_eq!(body["type"], "response.create");
-            let output = events(if first { "first" } else { "next" });
+            let output = answer(events(if first { "first" } else { "next" }), &body, Behavior::Complete);
             let prefix = if first { if body["generate"] == false { 1 } else { 2 } } else { output.len() };
             for event in output.iter().take(prefix) {
                 if socket.send(UpstreamMessage::Text(event.to_string())).await.is_err() {

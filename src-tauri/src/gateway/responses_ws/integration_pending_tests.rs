@@ -26,7 +26,7 @@ async fn pending_ws(State(stub): State<PendingStub>, upgrade: WebSocketUpgrade) 
             let output = if body["generate"] == false {
                 vec![json!({"type":"response.completed","response":{"id":"resp-first","status":"completed","output":[]}})]
             } else {
-                events(if first { "first" } else { "next" })
+                answer(events(if first { "first" } else { "next" }), &body, Behavior::Complete)
             };
             let prefix = if first && body["generate"] != false { 2 } else { 0 };
             for event in output.iter().take(prefix) {

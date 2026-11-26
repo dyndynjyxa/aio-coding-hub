@@ -334,7 +334,9 @@ where
         .await;
         timing.upstream_sent = match &outcome {
             SendOutcome::Response(_) | SendOutcome::Rejected(_) => true,
-            SendOutcome::Transport(reason) => *reason == "ws_send_failed",
+            SendOutcome::Transport(reason) => {
+                matches!(*reason, "ws_send_failed" | "ws_previous_response_ignored")
+            }
             _ => false,
         };
         loop_state.abort_guard.update_in_flight_attempt_send_state(

@@ -238,7 +238,7 @@ pub(in crate::gateway) async fn send(
     } else if sent {
         let socket = &mut reusable.connection.socket;
         let deadline = deadline.map(tokio::time::Instant::from_std);
-        read_prelude(socket, deadline).await
+        read_prelude(socket, previous.as_deref(), deadline).await
     } else {
         Prelude::Lost
     };
@@ -265,6 +265,12 @@ pub(in crate::gateway) async fn send(
                 require_http: false,
                 reason: "ws_reused_socket_lost",
             }
+        }
+        Prelude::Ignored => {
+            connection.runtime.shun(key);
+            // The relay began a reply: logged as an attempt sent upstream; the
+            // continuation then moves to HTTP as after any WS transport failure.
+            return SendOutcome::Transport("ws_previous_response_ignored");
         }
     };
     if let Some(request) = request {
@@ -302,6 +308,8 @@ enum Prelude {
     Ready(VecDeque<String>),
     /// The kept socket ended before it answered.
     Lost,
+    /// A continuation answered without naming the response it continues.
+    Ignored,
 }
 
 /// Frames that may come ahead of a reply and say nothing of it.
@@ -316,9 +324,10 @@ const NEUTRAL_EVENTS: [&str; 6] = [
 const MAX_PRELUDE_FRAMES: usize = 8;
 
 /// Read a kept socket's first frames before anything is handed on: it may have
-/// ended between turns.
+/// ended between turns, and a relay may answer a continuation's input alone.
 async fn read_prelude(
     socket: &mut UpstreamWebSocket,
+    previous: Option<&str>,
     deadline: Option<tokio::time::Instant>,
 ) -> Prelude {
     let mut frames = VecDeque::new();
@@ -337,12 +346,14 @@ async fn read_prelude(
             Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
             _ => return Prelude::Lost,
         };
-        let step = serde_json::from_str(&text).map_or(Step::Reply, |event| prelude_step(&event));
+        let step =
+            serde_json::from_str(&text).map_or(Step::Reply, |event| prelude_step(&event, previous));
         frames.push_back(text);
         match step {
             Step::Neutral => {}
             Step::Reply => break,
             Step::Lost => return Prelude::Lost,
+            Step::Ignored => return Prelude::Ignored,
         }
     }
     Prelude::Ready(frames)
@@ -353,9 +364,10 @@ enum Step {
     Neutral,
     Reply,
     Lost,
+    Ignored,
 }
 
-fn prelude_step(event: &Value) -> Step {
+fn prelude_step(event: &Value, previous: Option<&str>) -> Step {
     let kind = event
         .get("type")
         .and_then(Value::as_str)
@@ -368,6 +380,16 @@ fn prelude_step(event: &Value) -> Step {
             == Some("websocket_connection_limit_reached")
     {
         return Step::Lost;
+    }
+    // OpenAI names the continued response in its response snapshot, as magpie checks; a
+    // relay that drops the field answers the new input as a whole conversation.
+    let named = matches!(kind, "response.created" | "response.in_progress")
+        && event
+            .pointer("/response/previous_response_id")
+            .and_then(Value::as_str)
+            == previous;
+    if previous.is_some() && !named && !matches!(kind, "error" | "response.failed") {
+        return Step::Ignored;
     }
     Step::Reply
 }
@@ -678,20 +700,51 @@ mod tests {
     }
 
     #[test]
-    fn prelude_skips_neutral_frames_and_treats_the_connection_limit_as_a_lost_socket() {
+    fn prelude_hands_on_only_a_reply_that_names_its_previous_response() {
         use serde_json::json;
+        let created = |previous: Value| json!({"type":"response.created","response":{"id":"resp-b","previous_response_id":previous}});
         for kind in NEUTRAL_EVENTS {
-            assert_eq!(prelude_step(&json!({"type":kind})), Step::Neutral);
+            assert_eq!(
+                prelude_step(&json!({"type":kind}), Some("resp-a")),
+                Step::Neutral
+            );
         }
         let limit = json!({"type":"error","error":{"code":"websocket_connection_limit_reached"}});
-        assert_eq!(prelude_step(&limit), Step::Lost);
-        for reply in [
+        assert_eq!(prelude_step(&limit, None), Step::Lost);
+        let delta = json!({"type":"response.output_text.delta","delta":"x"});
+        assert_eq!(prelude_step(&delta, None), Step::Reply);
+        assert_eq!(
+            prelude_step(
+                &json!({"type":"response.created","response":{"id":"resp-b"}}),
+                None
+            ),
+            Step::Reply
+        );
+        assert_eq!(
+            prelude_step(&created(json!("resp-a")), Some("resp-a")),
+            Step::Reply
+        );
+        let in_progress =
+            json!({"type":"response.in_progress","response":{"previous_response_id":"resp-a"}});
+        assert_eq!(prelude_step(&in_progress, Some("resp-a")), Step::Reply);
+        // Errors reach the gate, which recovers previous_response_not_found itself.
+        for kind in ["error", "response.failed"] {
+            assert_eq!(
+                prelude_step(&json!({"type":kind}), Some("resp-a")),
+                Step::Reply
+            );
+        }
+        for ignored in [
+            created(json!("resp-other")),
+            created(Value::Null),
             json!({"type":"response.created","response":{"id":"resp-b"}}),
-            json!({"type":"response.output_text.delta","delta":"x"}),
-            // The gate recovers previous_response_not_found itself.
-            json!({"type":"error","error":{"code":"previous_response_not_found"}}),
+            delta,
         ] {
-            assert_eq!(prelude_step(&reply), Step::Reply, "{reply}");
+            assert_eq!(
+                prelude_step(&ignored, Some("resp-a")),
+                Step::Ignored,
+                "{ignored}"
+            );
         }
     }
 

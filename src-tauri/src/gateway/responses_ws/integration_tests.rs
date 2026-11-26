@@ -273,6 +273,8 @@ enum Behavior {
     DisconnectSecondCreate,
     /// Closes the socket of the first continuation it gets, after response.created.
     DisconnectAfterCreated,
+    /// Answers a continuation without naming its previous response, as a relay that drops it.
+    IgnorePreviousResponse,
     ErrorAfterContent(&'static str),
     JsonComplete,
     JsonIncomplete,
@@ -332,6 +334,22 @@ fn events(name: &str) -> Vec<Value> {
     ]
 }
 
+/// OpenAI answers a continuation with response.created naming the response it continues.
+fn answer(mut output: Vec<Value>, body: &Value, behavior: Behavior) -> Vec<Value> {
+    let Some(previous) = body
+        .get("previous_response_id")
+        .filter(|_| !matches!(behavior, Behavior::IgnorePreviousResponse))
+    else {
+        return output;
+    };
+    if output[0]["type"] != "response.created" {
+        let id = output.last().unwrap()["response"]["id"].clone();
+        output.insert(0, json!({"type":"response.created","response":{"id":id}}));
+    }
+    output[0]["response"]["previous_response_id"] = previous.clone();
+    output
+}
+
 async fn stub_ws(
     State(stub): State<Stub>,
     headers: HeaderMap,
@@ -371,7 +389,7 @@ async fn stub_ws(
                 if matches!(stub.behavior, Behavior::DisconnectSecondCreate) && creates == 2 {
                     break;
                 }
-                let output = events(stub.name);
+                let output = answer(events(stub.name), &body, stub.behavior);
                 let disconnect = matches!(stub.behavior, Behavior::DisconnectAfterCreated)
                     && body.get("previous_response_id").is_some()
                     && !stub
@@ -417,6 +435,7 @@ async fn stub_ws(
                         | Behavior::DisconnectIncrementalBeforeOutput
                         | Behavior::DisconnectSecondCreate
                         | Behavior::DisconnectAfterCreated
+                        | Behavior::IgnorePreviousResponse
                 ) || disconnect
                 {
                     break;
@@ -1235,6 +1254,67 @@ async fn cooling_keeps_open_sockets_and_moves_sessions_that_lose_ws_context_to_h
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn continuation_answered_without_its_previous_response_moves_to_http() {
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::IgnorePreviousResponse).await;
+    fixture.provider("A", &upstream.origin(), true);
+    let (gateway, mut logs) = fixture.start().await;
+    let session = "ignored-previous-response";
+    let mut socket = connect(&gateway, session).await.unwrap();
+    socket.send(create_message(None)).await.unwrap();
+    recv_until(&mut socket, "response.completed").await;
+    assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type":"response.create", "model":"gpt-test", "previous_response_id":"resp-A",
+                "input":[{"role":"user","content":"continue"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    // Nothing of an answer that lost the conversation reaches Codex.
+    let observed = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut observed = Vec::new();
+        loop {
+            let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+                continue;
+            };
+            let event: Value = serde_json::from_str(&text).unwrap();
+            let error = event["type"] == "error";
+            observed.push(event);
+            if error {
+                return observed;
+            }
+        }
+    })
+    .await
+    .expect("context error");
+    assert_eq!(observed.len(), 1, "{observed:?}");
+    assert_eq!(observed[0]["error"]["code"], "previous_response_not_found");
+    let failure = terminal_log(&mut logs).await;
+    assert_eq!(
+        full_input_retry_cause(&failure),
+        "ws_previous_response_ignored"
+    );
+    // The relay was called and began a reply, which the log keeps.
+    let attempts: Vec<Value> = serde_json::from_str(&failure.attempts_json).unwrap();
+    assert_eq!(attempts.len(), 1, "{attempts:?}");
+    assert_eq!(attempts[0]["reason"], "ws_previous_response_ignored");
+    assert_eq!(attempts[0]["upstream_sent"], true);
+    drop(socket);
+    match connect(&gateway, session).await {
+        Err(Error::Http(response)) => assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED),
+        _ => panic!("a relay that drops previous_response_id must move the session to HTTP"),
+    }
+    // Other sessions skip the socket while it cools.
+    assert_completed(&generate(&gateway, "other-session").await, "A");
+    assert_eq!(stub.transports(), ["ws", "http"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ws_capable_provider_uses_upstream_ws_and_selected_credentials() {
     let fixture = Fixture::new(true).await;
     let (stub, upstream) = Stub::start("A", Behavior::Complete).await;
@@ -1590,16 +1670,16 @@ async fn cli_recovery_ws(
                 match stub.failure {
                     CliRecoveryFailure::Disconnect => break,
                     CliRecoveryFailure::ContextLost => vec![error],
-                    CliRecoveryFailure::ContextLostAfterOutput => events("partial").into_iter().take(3).chain(std::iter::once(error)).collect(),
+                    CliRecoveryFailure::ContextLostAfterOutput => answer(events("partial").into_iter().take(3).chain(std::iter::once(error)).collect(), &body, Behavior::Complete),
                 }
             } else {
                 let item = cli_tool_item(&body, "");
                 *stub.tool_item.lock().unwrap() = Some(item.clone());
-                vec![
+                answer(vec![
                     json!({"type":"response.created","response":{"id":"resp-tool"}}),
                     json!({"type":"response.output_item.done","item":item}),
                     json!({"type":"response.completed","response":{"id":"resp-tool","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}),
-                ]
+                ], &body, Behavior::Complete)
             };
             for event in output {
                 if socket.send(axum::extract::ws::Message::Text(event.to_string())).await.is_err() { return; }
@@ -2216,7 +2296,7 @@ async fn cli_two_turn_ws(
         .on_upgrade(move |mut socket| async move {
             while let Some(Ok(axum::extract::ws::Message::Text(text))) = socket.recv().await {
                 let body: Value = serde_json::from_str(&text).unwrap();
-                for event in stub.response(body) {
+                for event in answer(stub.response(body.clone()), &body, Behavior::Complete) {
                     if socket
                         .send(axum::extract::ws::Message::Text(event.to_string()))
                         .await

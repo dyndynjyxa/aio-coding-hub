@@ -60,7 +60,8 @@ async fn cli_interrupt_ws(
                 continue;
             }
             assert_eq!(body["type"], "response.create");
-            let (first, output) = stub.output(body);
+            let (first, output) = stub.output(body.clone());
+            let output = answer(output, &body, Behavior::Complete);
             let count = if first { 4 } else { output.len() };
             for event in output.into_iter().take(count) {
                 socket.send(ServerMessage::Text(event.to_string())).await.unwrap();
